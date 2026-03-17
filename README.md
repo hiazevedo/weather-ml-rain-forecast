@@ -193,7 +193,7 @@ weather-pipeline-scheduler (4x/dia)
 ## 🚀 Como reproduzir
 
 ### Pré-requisitos
-- Projeto `weather-dlt-pipeline-birigui` executado
+- Projeto `weather-dlt-pipeline` executado
 - Tabela `weather_pipeline.silver.weather_clean` populada
 
 ### Passo a passo
