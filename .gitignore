@@ -1,0 +1,15 @@
+# AMbiente virtual
+.venv311/
+.venv/
+
+# Credenciais
+.bundle/
+.databricks/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# VS code
+.vscode/settings.json
