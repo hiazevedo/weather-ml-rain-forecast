@@ -252,7 +252,7 @@ Precipitação horária tem distribuição extremamente assimétrica — 80% dos
 | 1 | [fuel-price-pipeline-br](https://github.com/hiazevedo/fuel-price-pipeline-br) | Batch, Medallion |
 | 2 | [earthquake-streaming-pipeline](https://github.com/hiazevedo/earthquake-streaming-pipeline) | Streaming, Auto Loader |
 | 3 | [earthquake-ml-pipeline](https://github.com/hiazevedo/earthquake-ml-pipeline) | MLflow, RandomForest |
-| 4 | [weather-dlt-pipeline-birigui](https://github.com/hiazevedo/weather-dlt-pipeline-birigui) | Delta Live Tables |
+| 4 | [weather-dlt-pipeline-birigui](https://github.com/hiazevedo/weather-dlt-pipeline) | Delta Live Tables |
 | 5 | **weather-ml-rain-forecast** ← você está aqui | ML Séries Temporais |
 
 ---
