@@ -1,10 +1,11 @@
-# 🤖 weather-ml-rain-forecast
+# Weather ML Rain Forecast — Birigui-SP
 
 > Modelo de Machine Learning para previsão de chuvas em Birigui-SP com XGBoost, RandomForest e Prophet — treinado com 87 anos de dados históricos
 
 ![Databricks](https://img.shields.io/badge/Databricks-FF3621?style=for-the-badge&logo=databricks&logoColor=white)
 ![MLflow](https://img.shields.io/badge/MLflow-0194E2?style=for-the-badge&logo=mlflow&logoColor=white)
 ![Apache Spark](https://img.shields.io/badge/Apache_Spark-E25A1C?style=for-the-badge&logo=apachespark&logoColor=white)
+![Unity Catalog](https://img.shields.io/badge/Unity_Catalog-0194E2?style=for-the-badge&logo=databricks&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
 
 ---
@@ -15,7 +16,7 @@ Pipeline completo de Machine Learning que utiliza **755.491 registros horários*
 
 ---
 
-## 🎯 Objetivos do modelo
+## Objetivos do modelo
 
 | Problema | Tipo | Target | Métrica |
 |----------|------|--------|---------|
@@ -24,7 +25,7 @@ Pipeline completo de Machine Learning que utiliza **755.491 registros horários*
 
 ---
 
-## 🏗️ Arquitetura
+## Arquitetura
 
 ```
 [weather_pipeline.silver.weather_clean]
@@ -62,7 +63,7 @@ Pipeline completo de Machine Learning que utiliza **755.491 registros horários*
 
 ---
 
-## 📊 Resultados
+## Resultados
 
 ### Classificação — vai chover na próxima hora?
 
@@ -84,7 +85,7 @@ Apesar do XGBoost ter F1 ligeiramente maior, o RandomForest v2 tem **recall supe
 
 ---
 
-## 🔧 Feature Engineering — 31 features
+## Feature Engineering — 31 features
 
 | Grupo | Features | Técnica |
 |-------|----------|---------|
@@ -105,7 +106,7 @@ precip_lag_3h       0.25  █████████████
 
 ---
 
-## ⚠️ Class Imbalance
+## Class Imbalance
 
 ```
 SEM CHUVA : 608.546 registros (80.5%)
@@ -119,39 +120,60 @@ COM CHUVA : 146.945 registros (19.5%)
 
 ---
 
-## 🔄 Retreinamento automático
+## Retreinamento automático
 
 O modelo é retreinado **1x por mês** via Job separado:
 
 ```
-weather-model-retrain
-  Schedule: dia 1 de cada mês às 02h (Brasília)
-  Task: 06_retrain_model.py
+[weather-ml] Retreinamento Mensal
+  Schedule: dia 1 de cada mês às 03h (Brasília)
 
-Lógica de retreinamento:
-  ├── Verifica se há +720h de dados novos (1 mês)
-  ├── Se sim → retreina com histórico completo atualizado
-  └── Registra nova versão no MLflow Registry
+  update_features  ← atualiza feature store incremental
+       │
+  retrain_model    ← retreina com histórico completo
+                   → registra nova versão no MLflow Registry
 ```
 
 ---
 
-## 🗂️ Estrutura do projeto
+## Estrutura do projeto
 
 ```
 weather-ml-rain-forecast/
-├── 01_feature_engineering.py   # 31 features + Feature Store Delta
-├── 02_exploratory_analysis.py  # EDA + correlações + heatmap hora×mês
-├── 03_model_training.py        # XGBoost + RF + Prophet com MLflow
-├── 04_model_evaluation.py      # Matriz confusão + ROC + Registry
-├── 05_batch_inference.py       # Predições 24h → gold.rain_forecast_ml
-├── 06_retrain_model.py         # Retreino mensal automático
-└── 07_update_features.py       # Atualização incremental feature store
+├── databricks.yml               # Databricks Asset Bundle — 2 Jobs configurados
+├── 01_feature_engineering.py    # 31 features + Feature Store Delta
+├── 02_exploratory_analysis.py   # EDA + correlações + heatmap hora×mês
+├── 03_model_training.py         # XGBoost + RF + Prophet com MLflow
+├── 04_model_evaluation.py       # Matriz confusão + ROC + Registry
+├── 05_batch_inference.py        # Predições 24h → gold.rain_forecast_ml
+├── 06_retrain_model.py          # Retreino mensal automático
+└── 07_update_features.py        # Atualização incremental feature store
 ```
 
 ---
 
-## 📦 MLflow Registry
+## Databricks Jobs
+
+O projeto configura **2 Jobs** via Asset Bundle (`databricks.yml`):
+
+```
+[weather-ml] Pipeline Completo (manual)
+  feature_engineering → model_training → model_evaluation → batch_inference
+
+[weather-ml] Retreinamento Mensal
+  Schedule: dia 1 de cada mês às 03h
+  update_features → retrain_model
+```
+
+Para fazer o deploy:
+
+```bash
+databricks bundle deploy
+```
+
+---
+
+## MLflow Registry
 
 ```
 rain-forecast-birigui
@@ -161,78 +183,84 @@ rain-forecast-birigui
 
 ---
 
-## ⏰ Integração com Workflow
+## Integração com Workflow principal
 
-O notebook `05_batch_inference.py` roda automaticamente dentro do pipeline principal:
+O notebook `05_batch_inference.py` roda automaticamente dentro do pipeline de previsão:
 
 ```
-weather-pipeline-scheduler (4x/dia)
-  ├── 01_collect_forecast
-  ├── 02_run_dlt_pipeline
-  ├── 03_build_gold_today
-  ├── 07_update_features    ← atualiza feature store
-  └── 05_batch_inference    ← predições ML atualizadas
+Weather Birigui - Previsao + ML (6h)
+  Schedule: 00h, 06h, 12h, 18h (Brasília)
+
+  coleta_previsao  ← coleta API Open-Meteo
+       │
+  dlt_pipeline     ← executa DLT Bronze→Silver→Gold
+       │
+  gold_today       ← atualiza weather_today e rain_alert
+       │
+  update_features  ← atualiza feature store
+       │
+  ml_inference     ← predições RandomForest 24h
 ```
 
 ---
 
-## 🛠️ Stack técnica
+## Stack técnica
 
 | Tecnologia | Uso |
 |------------|-----|
 | **Databricks Free Edition** | Ambiente Serverless AWS |
+| **Unity Catalog** | Feature Store + Model Registry storage |
 | **MLflow** | Experiment tracking + Model Registry |
 | **Scikit-learn** | RandomForest + GradientBoosting |
 | **Prophet** | Séries temporais sazonais |
 | **Spark ML** | Feature engineering distribuído |
 | **Delta Lake** | Feature Store + Predictions table |
+| **Databricks Asset Bundles** | 2 Jobs como código |
 | **Databricks Workflows** | Inferência 4x/dia + retreino mensal |
 
 ---
 
-## 🚀 Como reproduzir
+## Como reproduzir
 
 ### Pré-requisitos
 - Projeto `weather-dlt-pipeline` executado
 - Tabela `weather_pipeline.silver.weather_clean` populada
+- Databricks CLI instalado e configurado
 
 ### Passo a passo
 
 ```bash
-# 1. Feature engineering (~10 min — 755k registros)
-01_feature_engineering.py
+# 1. Clone o repositório
+git clone https://github.com/hiazevedo/weather-ml-rain-forecast.git
+cd weather-ml-rain-forecast
 
-# 2. EDA (opcional)
-02_exploratory_analysis.py
-
-# 3. Treinar modelos (~30 min)
-03_model_training.py
-
-# 4. Avaliar e registrar no MLflow
-04_model_evaluation.py
-
-# 5. Rodar inferência
-05_batch_inference.py
-
-# 6. Configurar retreino mensal
-06_retrain_model.py
+# 2. Deploy via Asset Bundle
+databricks bundle deploy
 ```
 
-### Configuração MLflow para Serverless
+Ou execute os notebooks manualmente na ordem:
 
-```python
-import os
-os.environ["MLFLOW_DFS_TMP"] = "/Volumes/weather_pipeline/bronze/mlflow_tmp"
+```
+01_feature_engineering.py    # Feature engineering (~10 min — 755k registros)
+02_exploratory_analysis.py   # EDA (opcional)
+03_model_training.py         # Treinar modelos (~30 min)
+04_model_evaluation.py       # Avaliar e registrar no MLflow
+05_batch_inference.py        # Rodar inferência
+06_retrain_model.py          # Configurar retreino mensal
+```
 
-EXPERIMENT_NAME = "/Users/{}/weather-ml-rain-forecast/weather-ml-rain-forecast".format(
-    spark.sql("SELECT current_user()").collect()[0][0]
-)
-mlflow.set_experiment(EXPERIMENT_NAME)
+### Unity Catalog
+
+```
+Catalog : weather_pipeline
+Schemas : silver | gold
+Feature Store : gold.rain_features
+Predictions   : gold.rain_forecast_ml
 ```
 
 ---
 
-## ⚙️ Decisões técnicas
+## Decisões técnicas
 
 **Por que split temporal e não aleatório?**
 Dados meteorológicos têm dependência temporal forte — horas consecutivas são altamente correlacionadas. Split aleatório causaria data leakage, inflando artificialmente as métricas. O split temporal (treino 1940–2022, teste 2024–2026) simula o uso real do modelo.
@@ -245,14 +273,14 @@ Precipitação horária tem distribuição extremamente assimétrica — 80% dos
 
 ---
 
-## 🔗 Projetos relacionados
+## Portfólio
 
-| # | Projeto | Skills |
-|---|---------|--------|
-| 1 | [fuel-price-pipeline-br](https://github.com/hiazevedo/fuel-price-pipeline-br) | Batch, Medallion |
-| 2 | [earthquake-streaming-pipeline](https://github.com/hiazevedo/earthquake-streaming-pipeline) | Streaming, Auto Loader |
-| 3 | [earthquake-ml-pipeline](https://github.com/hiazevedo/earthquake-ml-pipeline) | MLflow, RandomForest |
-| 4 | [weather-dlt-pipeline](https://github.com/hiazevedo/weather-dlt-pipeline) | Delta Live Tables |
-| 5 | **weather-ml-rain-forecast** ← você está aqui | ML Séries Temporais |
+Este projeto faz parte do [Databricks Data Engineering Portfolio](https://github.com/hiazevedo/databricks-portfolio), uma série de projetos práticos cobrindo o ciclo completo de engenharia de dados com Databricks.
 
----
+| # | Projeto | Tema |
+|---|---------|------|
+| 1 | [fuel-price-pipeline-br](https://github.com/hiazevedo/fuel-price-pipeline-br) | Batch · Medallion · ANP |
+| 2 | [earthquake-streaming-pipeline](https://github.com/hiazevedo/earthquake-streaming-pipeline) | Streaming · Auto Loader · USGS |
+| 3 | [earthquake-ml-pipeline](https://github.com/hiazevedo/earthquake-ml-pipeline) | ML · MLflow · Spark ML |
+| 4 | [weather-dlt-pipeline](https://github.com/hiazevedo/weather-dlt-pipeline) | DLT · Workflows · Open-Meteo |
+| 5 | **weather-ml-rain-forecast** ← você está aqui | ML Avançado · Previsão de Chuva |
