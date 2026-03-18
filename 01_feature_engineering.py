@@ -44,8 +44,10 @@ print(f"   Período: {df.agg(F.min('observation_time')).collect()[0][0]} → "
 # Criar features de lag e rolling window
 print("Criando features...\n")
 
-# Window ordenada por tempo - para features de lag
-w = Window.orderBy("observation_time")
+# Window particionada por ano para distribuir a carga entre executors
+# Trade-off: lags que cruzam virada de ano (Jan 1, 00h-23h) ficam nulos,
+# mas esses registros são removidos pelo filter de temp_lag_24h.isNotNull() abaixo
+w = Window.partitionBy("year").orderBy("observation_time")
 
 PI = math.pi
 

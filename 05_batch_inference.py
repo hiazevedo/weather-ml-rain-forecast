@@ -1,21 +1,10 @@
 # Databricks notebook source
 # Configurações
-import mlflow
-import mlflow.sklearn
-import os
 import numpy as np
 import pandas as pd
 from pyspark.sql import functions as F
 from datetime import datetime, timezone
 import pytz
-
-MLFLOW_TMP = "/Volumes/weather_pipeline/bronze/mlflow_tmp"
-os.environ["MLFLOW_DFS_TMP"] = MLFLOW_TMP
-
-EXPERIMENT_NAME = "/Users/{}/weather-ml-rain-forecast/weather-ml-rain-forecast".format(
-    spark.sql("SELECT current_user()").collect()[0][0]
-)
-mlflow.set_experiment(EXPERIMENT_NAME)
 
 FEATURE_TABLE      = "weather_pipeline.gold.rain_features"
 FORECAST_TABLE     = "weather_pipeline.silver.weather_forecast"
@@ -51,24 +40,29 @@ print("Carregando modelo do MLflow Registry...\n")
 
 from sklearn.ensemble import RandomForestClassifier
 
-# Retreinar o modelo final (MLflow Registry no Serverless
-# não suporta load direto — padrão conhecido)
-df_train = spark.table(FEATURE_TABLE) \
-    .filter(F.col("observation_time") < "2023-01-01") \
-    .dropna(subset=ML_FEATURES + ["target_will_rain"])
+# Tentar carregar modelo do MLflow Registry
+try:
+    model = mlflow.sklearn.load_model(f"models:/{MODEL_NAME}/latest")
+    print(f"   Modelo carregado do Registry: {MODEL_NAME}/latest")
+except Exception as e:
+    print(f"   Registry indisponível ({e}) — retreinando com subset...")
+    # Fallback: treinar nos últimos 5 anos com amostragem (evita OOM no serverless)
+    df_train = spark.table(FEATURE_TABLE) \
+        .filter(F.col("observation_time") >= "2018-01-01") \
+        .filter(F.col("observation_time") <  "2023-01-01") \
+        .dropna(subset=ML_FEATURES + ["target_will_rain"]) \
+        .sample(fraction=0.5, seed=42)
 
-X_train     = df_train.select(ML_FEATURES).toPandas()
-y_train     = df_train.select("target_will_rain").toPandas().values.ravel()
+    X_train = df_train.select(ML_FEATURES).toPandas()
+    y_train = df_train.select("target_will_rain").toPandas().values.ravel()
 
-model = RandomForestClassifier(
-    n_estimators=200, max_depth=15,
-    class_weight="balanced",
-    random_state=42, n_jobs=-1
-)
-model.fit(X_train, y_train)
-
-print(f"   Modelo carregado e treinado")
-print(f"   Registros de treino : {len(X_train):,}")
+    model = RandomForestClassifier(
+        n_estimators=100, max_depth=10,
+        class_weight="balanced",
+        random_state=42, n_jobs=-1
+    )
+    model.fit(X_train, y_train)
+    print(f"   Modelo retreinado | registros de treino: {len(X_train):,}")
 
 # COMMAND ----------
 
@@ -157,7 +151,7 @@ df_with_features = (
 df_next24 = df_with_features \
     .filter(F.col("observation_time") > F.current_timestamp()) \
     .filter(F.col("observation_time") <=
-            F.date_add(F.current_timestamp(), 1)) \
+            F.current_timestamp() + F.expr("INTERVAL 24 HOURS")) \
     .dropna(subset=ML_FEATURES)
 
 total = df_next24.count()

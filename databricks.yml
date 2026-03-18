@@ -1,0 +1,67 @@
+bundle:
+  name: weather-ml-rain-forecast
+
+workspace:
+  host: https://dbc-4755d9a9-d11b.cloud.databricks.com
+  root_path: ~/.bundle/${bundle.name}/${bundle.target}
+
+targets:
+  dev:
+    mode: development
+    default: true
+
+  prod:
+    mode: production
+    workspace:
+      root_path: /Shared/weather-ml-rain-forecast
+
+resources:
+  jobs:
+    weather_ml_full_pipeline:
+      name: "[weather-ml] Pipeline Completo (manual)"
+      tasks:
+        - task_key: feature_engineering
+          notebook_task:
+            notebook_path: ${workspace.file_path}/01_feature_engineering
+            source: WORKSPACE
+
+        - task_key: model_training
+          depends_on:
+            - task_key: feature_engineering
+          notebook_task:
+            notebook_path: ${workspace.file_path}/03_model_training
+            source: WORKSPACE
+
+        - task_key: model_evaluation
+          depends_on:
+            - task_key: model_training
+          notebook_task:
+            notebook_path: ${workspace.file_path}/04_model_evaluation
+            source: WORKSPACE
+
+        - task_key: batch_inference
+          depends_on:
+            - task_key: model_evaluation
+          notebook_task:
+            notebook_path: ${workspace.file_path}/05_batch_inference
+            source: WORKSPACE
+
+    weather_ml_retrain:
+      name: "[weather-ml] Retreinamento Mensal"
+      schedule:
+        quartz_cron_expression: "0 0 3 1 * ?"
+        timezone_id: "America/Sao_Paulo"
+        pause_status: PAUSED
+
+      tasks:
+        - task_key: update_features
+          notebook_task:
+            notebook_path: ${workspace.file_path}/07_update_features
+            source: WORKSPACE
+
+        - task_key: retrain_model
+          depends_on:
+            - task_key: update_features
+          notebook_task:
+            notebook_path: ${workspace.file_path}/06_retrain_model
+            source: WORKSPACE

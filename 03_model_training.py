@@ -94,9 +94,12 @@ print(f"   Dados prontos!")
 print(f"   Taxa de chuva treino : {y_clf_train.mean()*100:.1f}%")
 print(f"   Taxa de chuva teste  : {y_clf_test.mean()*100:.1f}%")
 
+# mask_train definido aqui para estar disponível em todos os blocos abaixo
+mask_train = y_reg_train > 0
+
 # COMMAND ----------
 
-# RandomForest Regressor
+# RandomForest — Classificador + Regressor 2 estágios
 
 print("Treinando RandomForest...\n")
 
@@ -132,8 +135,7 @@ with mlflow.start_run(run_name="RF_Classifier_v2") as run:
     )
     print(f"   RF Classifier — F1: {f1:.4f} | AUC: {auc:.4f}")
 
-# Regressor
-# Estratégia: pipeline de 2 etapas
+# Regressor — pipeline de 2 estágios
 # Etapa 1: classificador decide SE vai chover
 # Etapa 2: regressor decide QUANTO vai chover (só quando etapa 1 = sim)
 with mlflow.start_run(run_name="RF_Regressor_v2") as run:
@@ -143,7 +145,6 @@ with mlflow.start_run(run_name="RF_Regressor_v2") as run:
     )
 
     # Treinar só com horas que choveu
-    mask_train = y_reg_train > 0
     rf_reg.fit(X_train[mask_train], y_reg_train[mask_train])
 
     # Predição em 2 etapas:
@@ -202,75 +203,7 @@ with mlflow.start_run(run_name="RF_Regressor_v2") as run:
 
 # COMMAND ----------
 
-# Modelo 2: RandomForest
-
-print("Treinando RandomForest...\n")
-
-# Classificador
-with mlflow.start_run(run_name="RandomForest_Classifier") as run:
-    rf_clf = RandomForestClassifier(
-        n_estimators=200, max_depth=15,
-        class_weight="balanced",   # trata class imbalance
-        random_state=42, n_jobs=-1
-    )
-    rf_clf.fit(X_train, y_clf_train)
-    y_pred_rf  = rf_clf.predict(X_test)
-    y_prob_rf  = rf_clf.predict_proba(X_test)[:, 1]
-
-    acc  = accuracy_score(y_clf_test, y_pred_rf)
-    f1   = f1_score(y_clf_test, y_pred_rf)
-    auc  = roc_auc_score(y_clf_test, y_prob_rf)
-    prec = precision_score(y_clf_test, y_pred_rf)
-    rec  = recall_score(y_clf_test, y_pred_rf)
-
-    mlflow.log_params({
-        "model": "RandomForest", "type": "classifier",
-        "n_estimators": 200, "max_depth": 15,
-        "class_weight": "balanced"
-    })
-    mlflow.log_metrics({
-        "accuracy": acc, "f1": f1, "auc_roc": auc,
-        "precision": prec, "recall": rec
-    })
-    mlflow.sklearn.log_model(rf_clf, "model")
-    rf_clf_run = run.info.run_id
-
-    print(f"   RandomForest Classifier:")
-    print(f"   Accuracy  : {acc:.4f}")
-    print(f"   F1        : {f1:.4f}")
-    print(f"   AUC-ROC   : {auc:.4f}")
-    print(f"   Precision : {prec:.4f}")
-    print(f"   Recall    : {rec:.4f}")
-
-# Regressor
-with mlflow.start_run(run_name="RandomForest_Regressor") as run:
-    rf_reg = RandomForestRegressor(
-        n_estimators=200, max_depth=15,
-        random_state=42, n_jobs=-1
-    )
-    rf_reg.fit(X_train[mask_train], y_reg_train[mask_train])
-    y_pred_rf_reg = np.maximum(rf_reg.predict(X_test), 0)
-
-    rmse = np.sqrt(mean_squared_error(y_reg_test, y_pred_rf_reg))
-    mae  = mean_absolute_error(y_reg_test, y_pred_rf_reg)
-    r2   = r2_score(y_reg_test, y_pred_rf_reg)
-
-    mlflow.log_params({
-        "model": "RandomForest", "type": "regressor",
-        "n_estimators": 200, "trained_on": "rain_only"
-    })
-    mlflow.log_metrics({"rmse": rmse, "mae": mae, "r2": r2})
-    mlflow.sklearn.log_model(rf_reg, "model")
-    rf_reg_run = run.info.run_id
-
-    print(f"\n   RandomForest Regressor:")
-    print(f"   RMSE : {rmse:.4f}")
-    print(f"   MAE  : {mae:.4f}")
-    print(f"   R²   : {r2:.4f}")
-
-# COMMAND ----------
-
-# Modelo 3: Prophet (séries temporais)
+# Modelo 2: Prophet (séries temporais)
 
 print("Treinando Prophet...\n")
 
