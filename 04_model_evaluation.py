@@ -26,10 +26,12 @@ plt.rcParams.update({
     "grid.alpha":       0.5,       "font.family":     "monospace",
 })
 
+mlflow.autolog(disable=True)
+
 MLFLOW_TMP = "/Volumes/weather_pipeline/bronze/mlflow_tmp"
 os.environ["MLFLOW_DFS_TMP"] = MLFLOW_TMP
 
-EXPERIMENT_NAME = "/Users/{}/weather-ml-rain-forecast/weather-ml-rain-forecast".format(
+EXPERIMENT_NAME = "/Users/{}/weather-ml-rain-forecast".format(
     spark.sql("SELECT current_user()").collect()[0][0]
 )
 mlflow.set_experiment(EXPERIMENT_NAME)
@@ -230,11 +232,8 @@ with mlflow.start_run(run_name="BestModel_RF_v2_FINAL") as run:
         "recall":    recall_score(y_clf_test, y_pred_best_t),
         "precision": precision_score(y_clf_test, y_pred_best_t)
     })
-    mlflow.sklearn.log_model(
-        rf_best, "model",
-        input_example    = X_train.iloc[:5],
-        registered_model_name = MODEL_NAME
-    )
+    # input_example e registered_model_name removidos — não suportados no Serverless Free Edition
+    mlflow.sklearn.log_model(rf_best, "model")
     run_id = run.info.run_id
 
 print(f"""

@@ -12,10 +12,12 @@ import os
 
 # COMMAND ----------
 
+mlflow.autolog(disable=True)
+
 MLFLOW_TMP = "/Volumes/weather_pipeline/bronze/mlflow_tmp"
 os.environ["MLFLOW_DFS_TMP"] = MLFLOW_TMP
 
-EXPERIMENT_NAME = "/Users/{}/weather-ml-rain-forecast/weather-ml-rain-forecast".format(
+EXPERIMENT_NAME = "/Users/{}/weather-ml-rain-forecast".format(
     spark.sql("SELECT current_user()").collect()[0][0]
 )
 mlflow.set_experiment(EXPERIMENT_NAME)
@@ -105,11 +107,8 @@ else:
             "test_size":    len(X_test),
         })
         mlflow.log_metrics({"f1": f1, "auc_roc": auc})
-        mlflow.sklearn.log_model(
-            model, "model",
-            input_example=X_train.iloc[:5],
-            registered_model_name="rain-forecast-birigui"
-        )
+        # input_example e registered_model_name removidos — não suportados no Serverless Free Edition
+        mlflow.sklearn.log_model(model, "model")
 
     print(f"""
        RETREINAMENTO CONCLUÍDO!

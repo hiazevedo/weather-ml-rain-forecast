@@ -25,14 +25,19 @@ from prophet import Prophet
 
 # COMMAND ----------
 
-# MLflow storage
+# Workaround obrigatório no Databricks Free Edition Serverless:
+# autolog tenta registrar no Model Registry, que não está disponível neste tier
+mlflow.autolog(disable=True)
+
+# MLflow storage via UC Volume (necessário no Serverless)
 MLFLOW_TMP = "/Volumes/weather_pipeline/bronze/mlflow_tmp"
 os.environ["MLFLOW_DFS_TMP"] = MLFLOW_TMP
 
 # Criar volume se não existir
 spark.sql("CREATE VOLUME IF NOT EXISTS weather_pipeline.bronze.mlflow_tmp")
 
-EXPERIMENT_NAME = "/Users/{}/weather-ml-rain-forecast/weather-ml-rain-forecast".format(
+# Caminho com um único nível — evita erro de pasta pai inexistente
+EXPERIMENT_NAME = "/Users/{}/weather-ml-rain-forecast".format(
     spark.sql("SELECT current_user()").collect()[0][0]
 )
 mlflow.set_experiment(EXPERIMENT_NAME)
@@ -129,10 +134,9 @@ with mlflow.start_run(run_name="RF_Classifier_v2") as run:
         "accuracy": acc, "f1": f1, "auc_roc": auc,
         "precision": prec, "recall": rec
     })
-    mlflow.sklearn.log_model(
-        rf_clf, "model",
-        input_example=X_train.iloc[:5]
-    )
+    # input_example removido — causa CONFIG_NOT_AVAILABLE no Serverless Free Edition
+    # (o MLflow tenta inferir schema via spark.conf.get, que não existe no Serverless)
+    mlflow.sklearn.log_model(rf_clf, "model")
     print(f"   RF Classifier — F1: {f1:.4f} | AUC: {auc:.4f}")
 
 # Regressor — pipeline de 2 estágios
@@ -188,10 +192,7 @@ with mlflow.start_run(run_name="RF_Regressor_v2") as run:
         "rmse_all":       rmse_all,
         "r2_all":         r2_all
     })
-    mlflow.sklearn.log_model(
-        rf_reg, "model",
-        input_example=X_train[mask_train].iloc[:5]
-    )
+    mlflow.sklearn.log_model(rf_reg, "model")
 
     print(f"   RF Regressor v2 (quando chove):")
     print(f"   R²   : {r2_rain:.4f}")
