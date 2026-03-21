@@ -51,7 +51,7 @@ resources:
       schedule:
         quartz_cron_expression: "0 0 3 1 * ?"
         timezone_id: "America/Sao_Paulo"
-        pause_status: PAUSED
+        pause_status: UNPAUSED
 
       tasks:
         - task_key: update_features

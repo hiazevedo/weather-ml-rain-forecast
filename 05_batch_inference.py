@@ -1,10 +1,18 @@
 # Databricks notebook source
 # Configurações
+import mlflow
+import mlflow.sklearn
 import numpy as np
 import pandas as pd
+import os
 from pyspark.sql import functions as F
 from datetime import datetime, timezone
 import pytz
+
+# Workaround obrigatório no Databricks Free Edition Serverless
+mlflow.autolog(disable=True)
+MLFLOW_TMP = "/Volumes/weather_pipeline/bronze/mlflow_tmp"
+os.environ["MLFLOW_DFS_TMP"] = MLFLOW_TMP
 
 FEATURE_TABLE      = "weather_pipeline.gold.rain_features"
 FORECAST_TABLE     = "weather_pipeline.silver.weather_forecast"
@@ -35,17 +43,28 @@ print(f"   Modelo     : {MODEL_NAME} v1")
 
 # COMMAND ----------
 
-# Carregar modelo do MLflow Registry
-print("Carregando modelo do MLflow Registry...\n")
+# Carregar modelo mais recente do experimento MLflow (sem Model Registry)
+print("Carregando modelo do MLflow...\n")
 
 from sklearn.ensemble import RandomForestClassifier
 
-# Tentar carregar modelo do MLflow Registry
+CURRENT_USER    = spark.sql("SELECT current_user()").collect()[0][0]
+EXPERIMENT_NAME = f"/Users/{CURRENT_USER}/weather-ml-rain-forecast"
+
 try:
-    model = mlflow.sklearn.load_model(f"models:/{MODEL_NAME}/latest")
-    print(f"   Modelo carregado do Registry: {MODEL_NAME}/latest")
+    runs = mlflow.search_runs(
+        experiment_names=[EXPERIMENT_NAME],
+        filter_string="params.type = 'classifier'",
+        order_by=["start_time DESC"],
+    )
+    if runs.empty:
+        raise ValueError("Nenhum run de classificador encontrado")
+
+    run_id = runs.iloc[0]["run_id"]
+    model  = mlflow.sklearn.load_model(f"runs:/{run_id}/model")
+    print(f"   Modelo carregado do MLflow | run_id: {run_id}")
 except Exception as e:
-    print(f"   Registry indisponível ({e}) — retreinando com subset...")
+    print(f"   Experimento não encontrado ({e}) — retreinando com subset...")
     # Fallback: treinar nos últimos 5 anos com amostragem (evita OOM no serverless)
     df_train = spark.table(FEATURE_TABLE) \
         .filter(F.col("observation_time") >= "2018-01-01") \
