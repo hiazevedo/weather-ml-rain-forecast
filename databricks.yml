@@ -7,7 +7,7 @@ workspace:
 
 targets:
   dev:
-    mode: development
+    # Sem mode: development — esse modo pausa todos os schedules a cada deploy
     default: true
 
   prod:
@@ -53,13 +53,21 @@ resources:
         timezone_id: "America/Sao_Paulo"
         pause_status: UNPAUSED
 
+      email_notifications:
+        on_failure:
+          - ${workspace.current_user.userName}
+
       tasks:
         - task_key: update_features
+          max_retries: 2
+          min_retry_interval_millis: 60000
           notebook_task:
             notebook_path: ${workspace.file_path}/07_update_features
             source: WORKSPACE
 
         - task_key: retrain_model
+          max_retries: 2
+          min_retry_interval_millis: 60000
           depends_on:
             - task_key: update_features
           notebook_task:
