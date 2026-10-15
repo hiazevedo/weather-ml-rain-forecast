@@ -81,30 +81,7 @@ def serie_om(cod):
     return d.rename(columns={"relative_humidity_2m": "relative_humidity", "windspeed_10m": "windspeed",
                              "total_column_integrated_water_vapour": "tcwv"})
 
-def features_b(h):
-    """As 46 features da variante B (mesmas fórmulas de features.py), em pandas."""
-    idx = pd.date_range(h["observation_time"].min(), h["observation_time"].max(), freq="h")
-    s = h.drop_duplicates("observation_time").set_index("observation_time").reindex(idx)
-    t, p, u = s["temperature_2m"], s["precipitation"], s["relative_humidity"]
-    for k in (1, 3, 24): s[f"temp_lag_{k}h"] = t.shift(k); s[f"precip_lag_{k}h"] = p.shift(k)
-    for k in (1, 3): s[f"humidity_lag_{k}h"] = u.shift(k)
-    s["temp_delta_1h"], s["humidity_delta_1h"], s["precip_delta_1h"] = t.diff(), u.diff(), p.diff()
-    s["temp_rolling_6h"], s["humidity_rolling_6h"] = t.rolling(6).mean().round(3), u.rolling(6).mean().round(3)
-    for k in (3, 6, 24): s[f"precip_rolling_{k}h"] = p.rolling(k).sum().round(3)
-    hr, mo = s.index.hour, s.index.month
-    s["hour"], s["month"], s["weekday"] = hr, mo, (s.index.dayofweek + 1) % 7 + 1
-    s["hour_sin"], s["hour_cos"] = np.round(np.sin(hr * 2 * np.pi / 24), 6), np.round(np.cos(hr * 2 * np.pi / 24), 6)
-    s["month_sin"], s["month_cos"] = np.round(np.sin(mo * 2 * np.pi / 12), 6), np.round(np.cos(mo * 2 * np.pi / 12), 6)
-    s["is_rainy_season"] = np.isin(mo, [10, 11, 12, 1, 2, 3]).astype(int)
-    s["is_peak_rain_month"] = np.isin(mo, [1, 2, 12]).astype(int)
-    s["is_afternoon"] = ((hr >= 12) & (hr <= 18)).astype(int)
-    s["dewpoint_depression"] = t - s["dew_point_2m"]
-    s["pressure_tend_3h"], s["pressure_tend_24h"] = s["pressure_msl"].diff(3), s["pressure_msl"].diff(24)
-    s["cloud_low_delta_1h"] = s["cloud_cover_low"].diff()
-    s["tcwv_delta_3h"] = s["tcwv"].diff(3)
-    s["wind_dir_sin"] = np.sin(np.radians(s["wind_direction_10m"]))
-    s["wind_dir_cos"] = np.cos(np.radians(s["wind_direction_10m"]))
-    return s
+# features da variante B em pandas: add_features_pandas() de ./features
 
 inmet = spark.table("weather_pipeline.silver.inmet_hourly").select(
     "station_id", "observation_time", "precip_mm").toPandas()
@@ -124,7 +101,7 @@ def tab(om, ob, lim):
 
 erros, series = [], {}
 for _, e in est.iterrows():
-    s = features_b(serie_om(e.station_id))
+    s = add_features_pandas(serie_om(e.station_id))
     m = inmet[inmet.station_id == e.station_id].set_index("observation_time")["precip_mm"]
     s["inmet_mm"] = m.reindex(s.index)
     series[e.station_id] = s

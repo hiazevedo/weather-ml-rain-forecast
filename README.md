@@ -111,6 +111,7 @@ A inferência usa as colunas que o próprio champion espera (`feature_names_in_`
 | `09_experiment_mos` | Corrigir a previsão com previsões arquivadas (MOS)? | A 1 dia: API 0,526 · champion 0,517 · MOS 0,528; a 2 dias: MOS 0,548 — aguardando mais dados |
 | `10_experiment_fonte_historica` | Treinar com ERA5 puro ou com a série mista (ERA5 → IFS em 2018)? | Empate no que a produção vê (F1 0,7015 vs 0,7042) — mantida a série mista (`best_match`), mesma fonte das horas recentes |
 | `11_experiment_inmet_validacao` | Como o Open-Meteo e o champion se saem contra chuva **medida** (INMET) nas cidades das estações? | Open-Meteo marca chuva em 2,4–2,9× mais horas que o pluviômetro (3 de 4 horas "chuvosas" estão secas no INMET), mas acerta o volume mensal (corr. 0,82–0,91). O v9 mantém F1 ≈ 0,69 contra o rótulo do Open-Meteo em outras cidades, mas cai para 0,22–0,46 contra a chuva medida — abaixo da persistência do próprio pluviômetro (0,40–0,61) |
+| `12_experiment_regional_inmet` | Treinar com chuva **medida** (INMET) melhora a previsão numa cidade sem estação? | Deixando cada estação de fora (como Birigui): F1 contra chuva medida 0,328 (champion) → **0,427** (regional), AUC 0,849 → 0,894; melhora nas 4 cidades. A persistência do pluviômetro (0,561) segue melhor, mas exige uma estação no local |
 
 **Top 5 features por correlação com target:**
 ```
@@ -176,7 +177,8 @@ weather-ml-rain-forecast/
 ├── 08_experiment_extra_features.py  # Experimento: extras do ERA5 + ENSO
 ├── 09_experiment_mos.py         # Experimento: MOS com previsões arquivadas
 ├── 10_experiment_fonte_historica.py # Experimento: ERA5 puro vs série mista
-└── 11_experiment_inmet_validacao.py # Experimento: validação com chuva medida (INMET)
+├── 11_experiment_inmet_validacao.py # Validação com chuva medida (INMET) — roda no job semanal
+└── 12_experiment_regional_inmet.py  # Experimento: modelo regional treinado com chuva medida
 ```
 
 ---

@@ -28,6 +28,7 @@ FORECAST_TABLE     = "weather_pipeline.silver.weather_forecast"
 PREDICTIONS_TABLE  = "weather_pipeline.gold.rain_forecast_ml"
 HISTORY_TABLE      = "weather_pipeline.gold.rain_forecast_ml_history"
 ACCURACY_VIEW      = "weather_pipeline.gold.rain_model_accuracy_hourly"
+LEAD_VIEW          = "weather_pipeline.gold.rain_model_accuracy_by_lead"
 MODEL_NAME         = "rain-forecast-birigui"
 UC_MODEL_NAME      = "workspace.default.rain-forecast-birigui"
 
@@ -220,6 +221,34 @@ spark.sql(f"""
     JOIN weather_pipeline.silver.weather_clean o
       ON o.observation_time = u.target_time AND o.is_forecast = false
     WHERE u.rn = 1
+""")
+
+# Acurácia por antecedência: TODAS as previsões do histórico (cada hora-alvo é
+# prevista por até 4 rodadas, com antecedências diferentes) × chuva observada.
+spark.sql(f"""
+    CREATE OR REPLACE VIEW {LEAD_VIEW} AS
+    SELECT
+        h.target_time,
+        h.inferencia_local,
+        CAST(CEIL((unix_timestamp(h.target_time) - unix_timestamp(h.inferencia_local)) / 3600) AS INT)
+                                                     AS antecedencia_h,
+        CASE
+            WHEN (unix_timestamp(h.target_time) - unix_timestamp(h.inferencia_local)) <= 6 * 3600  THEN '01–06 h'
+            WHEN (unix_timestamp(h.target_time) - unix_timestamp(h.inferencia_local)) <= 12 * 3600 THEN '07–12 h'
+            WHEN (unix_timestamp(h.target_time) - unix_timestamp(h.inferencia_local)) <= 18 * 3600 THEN '13–18 h'
+            ELSE '19–24 h'
+        END                                          AS faixa_antecedencia,
+        h.modelo,
+        ROUND(h.prob_chuva, 3)                       AS prob_chuva,
+        h.pred_vai_chover,
+        h.api_precip_alvo,
+        CAST(h.api_precip_alvo > 0 AS INT)           AS api_vai_chover,
+        o.precipitation                              AS chuva_real_mm,
+        CAST(o.precipitation > 0 AS INT)             AS choveu
+    FROM {HISTORY_TABLE} h
+    JOIN weather_pipeline.silver.weather_clean o
+      ON o.observation_time = h.target_time AND o.is_forecast = false
+    WHERE h.inferencia_local < h.target_time
 """)
 print(f"\nResumo das próximas 24h:")
 display(spark.sql(f"""

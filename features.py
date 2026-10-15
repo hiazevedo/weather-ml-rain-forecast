@@ -104,4 +104,44 @@ def add_features(df, w):
         .withColumn("wind_dir_cos",        F.cos(F.radians("wind_direction_10m")))
     )
 
+def add_features_pandas(h):
+    """Mesmas features de add_features(), em pandas, para séries de outros pontos
+    (ex.: Open-Meteo nas coordenadas das estações do INMET).
+
+    `h`: DataFrame com observation_time (hora local) e as colunas brutas
+    (temperature_2m, apparent_temperature, precipitation, relative_humidity,
+    windspeed, dew_point_2m, pressure_msl, cloud_cover*, wind_direction_10m,
+    tcwv, boundary_layer_height). Devolve a série horária contínua (horas
+    faltantes viram NaN), indexada por observation_time.
+    """
+    import numpy as np
+    import pandas as pd
+    idx = pd.date_range(h["observation_time"].min(), h["observation_time"].max(), freq="h")
+    s = h.drop_duplicates("observation_time").set_index("observation_time").reindex(idx)
+    s.index.name = "observation_time"
+    t, p, u = s["temperature_2m"], s["precipitation"], s["relative_humidity"]
+    for k in (1, 3, 24):
+        s[f"temp_lag_{k}h"], s[f"precip_lag_{k}h"] = t.shift(k), p.shift(k)
+    for k in (1, 3):
+        s[f"humidity_lag_{k}h"] = u.shift(k)
+    s["temp_delta_1h"], s["humidity_delta_1h"], s["precip_delta_1h"] = t.diff(), u.diff(), p.diff()
+    s["temp_rolling_6h"] = t.rolling(6).mean().round(3)
+    s["humidity_rolling_6h"] = u.rolling(6).mean().round(3)
+    for k in (3, 6, 24):
+        s[f"precip_rolling_{k}h"] = p.rolling(k).sum().round(3)
+    hr, mo = s.index.hour, s.index.month
+    s["hour"], s["month"], s["weekday"] = hr, mo, (s.index.dayofweek + 1) % 7 + 1   # convenção do Spark
+    s["hour_sin"], s["hour_cos"] = np.round(np.sin(hr * 2 * np.pi / 24), 6), np.round(np.cos(hr * 2 * np.pi / 24), 6)
+    s["month_sin"], s["month_cos"] = np.round(np.sin(mo * 2 * np.pi / 12), 6), np.round(np.cos(mo * 2 * np.pi / 12), 6)
+    s["is_rainy_season"] = np.isin(mo, [10, 11, 12, 1, 2, 3]).astype(int)
+    s["is_peak_rain_month"] = np.isin(mo, [1, 2, 12]).astype(int)
+    s["is_afternoon"] = ((hr >= 12) & (hr <= 18)).astype(int)
+    s["dewpoint_depression"] = t - s["dew_point_2m"]
+    s["pressure_tend_3h"], s["pressure_tend_24h"] = s["pressure_msl"].diff(3), s["pressure_msl"].diff(24)
+    s["cloud_low_delta_1h"] = s["cloud_cover_low"].diff()
+    s["tcwv_delta_3h"] = s["tcwv"].diff(3)
+    s["wind_dir_sin"] = np.sin(np.radians(s["wind_direction_10m"]))
+    s["wind_dir_cos"] = np.cos(np.radians(s["wind_direction_10m"]))
+    return s
+
 print(f"features carregadas — {len(ML_FEATURES)} ({len(ML_FEATURES_BASE)} base + {len(ML_FEATURES_EXTRA)} extras)")
