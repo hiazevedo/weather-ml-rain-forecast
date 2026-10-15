@@ -158,6 +158,18 @@ else:
 
     if promote:
         client.set_registered_model_alias(UC_MODEL_NAME, "champion", mv.version)
+
+    # Métricas de validação por versão (consumidas pelo dashboard)
+    from datetime import datetime
+    spark.createDataFrame([(
+        int(mv.version), run_id, datetime.now(), bool(promote),
+        float(f1), float(acc), float(prec), float(rec), float(auc),
+        int(len(X_train)), int(len(X_test)), float(y_test.mean()),
+    )], "version int, run_id string, created_at timestamp, promoted boolean, "
+        "f1 double, accuracy double, `precision` double, recall double, auc_roc double, "
+        "train_size int, test_size int, test_rain_rate double"
+    ).write.mode("append").saveAsTable("weather_pipeline.gold.rain_model_versions")
+
     print(f"   Versão registrada : {UC_MODEL_NAME} v{mv.version}")
     print(f"   Champion          : {'PROMOVIDA' if promote else 'mantido'} — {motivo}")
 

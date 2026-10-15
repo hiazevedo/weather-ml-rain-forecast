@@ -22,6 +22,8 @@ os.environ["MLFLOW_DFS_TMP"] = MLFLOW_TMP
 FEATURE_TABLE      = "weather_pipeline.gold.rain_features"
 FORECAST_TABLE     = "weather_pipeline.silver.weather_forecast"
 PREDICTIONS_TABLE  = "weather_pipeline.gold.rain_forecast_ml"
+HISTORY_TABLE      = "weather_pipeline.gold.rain_forecast_ml_history"
+ACCURACY_VIEW      = "weather_pipeline.gold.rain_model_accuracy_hourly"
 BEST_THRESHOLD     = 0.65
 MODEL_NAME         = "rain-forecast-birigui"
 UC_MODEL_NAME      = "workspace.default.rain-forecast-birigui"
@@ -154,11 +156,14 @@ df_with_features = (
         F.when(F.col("hour").between(12, 18), 1).otherwise(0))
 )
 
-# Filtrar apenas as próximas 24h do forecast
+# Filtrar apenas as próximas 24h do forecast.
+# observation_time é hora LOCAL sem fuso: comparar com current_timestamp() (UTC)
+# deslocava a janela em 3h. Usamos a hora local (naive) no mesmo formato.
+agora_local = datetime.now(TZ_BR).strftime("%Y-%m-%d %H:%M:%S")
+t0 = F.lit(agora_local).cast("timestamp")
 df_next24 = df_with_features \
-    .filter(F.col("observation_time") > F.current_timestamp()) \
-    .filter(F.col("observation_time") <=
-            F.current_timestamp() + F.expr("INTERVAL 24 HOURS")) \
+    .filter(F.col("observation_time") > t0) \
+    .filter(F.col("observation_time") <= t0 + F.expr("INTERVAL 24 HOURS")) \
     .dropna(subset=ML_FEATURES)
 
 total = df_next24.count()
@@ -190,6 +195,10 @@ results_pd["alerta_chuva"] = results_pd["prob_chuva"].apply(
         "🟡 POSSÍVEL CHUVA" if p >= 0.40 else
         "🟢 SEM CHUVA"
 )
+# O modelo recebe as features da hora t e prevê chuva na hora t+1
+# (target_will_rain = precipitação de t+1 > 0). target_time é a hora prevista.
+results_pd["target_time"]      = results_pd["observation_time"] + pd.Timedelta(hours=1)
+results_pd["inferencia_local"] = pd.Timestamp(agora_local)  # hora local, comparável a target_time
 results_pd["threshold_usado"]  = BEST_THRESHOLD
 results_pd["modelo"]           = f"{MODEL_NAME} v{MODEL_VERSION}"
 results_pd["inferencia_at"]    = datetime.now(timezone.utc).isoformat()
@@ -203,6 +212,51 @@ df_results.write \
     .saveAsTable(PREDICTIONS_TABLE)
 
 print(f"Predições salvas: {PREDICTIONS_TABLE}")
+
+# Histórico (append): permite medir acurácia REAL comparando cada previsão
+# com a chuva observada depois. Idempotente por (inferencia_local, target_time).
+df_results.createOrReplaceTempView("_novas_predicoes")
+spark.sql(f"""
+    CREATE TABLE IF NOT EXISTS {HISTORY_TABLE} AS
+    SELECT * FROM _novas_predicoes WHERE 1 = 0
+""")
+spark.sql(f"""
+    MERGE INTO {HISTORY_TABLE} h
+    USING _novas_predicoes n
+      ON h.inferencia_local = n.inferencia_local AND h.target_time = n.target_time
+    WHEN NOT MATCHED THEN INSERT *
+""")
+
+# Acurácia real por hora: última previsão feita ANTES da hora-alvo vs chuva
+# observada (silver.weather_clean com is_forecast = false).
+spark.sql(f"""
+    CREATE OR REPLACE VIEW {ACCURACY_VIEW} AS
+    WITH ultima AS (
+        SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY target_time ORDER BY inferencia_local DESC) AS rn
+        FROM {HISTORY_TABLE}
+        WHERE inferencia_local < target_time
+    )
+    SELECT
+        u.target_time,
+        u.inferencia_local,
+        ROUND(u.prob_chuva, 3)                       AS prob_chuva,
+        u.pred_vai_chover,
+        u.threshold_usado,
+        u.modelo,
+        o.precipitation                              AS chuva_real_mm,
+        CAST(o.precipitation > 0 AS INT)             AS choveu,
+        CASE
+            WHEN o.precipitation > 0  AND u.pred_vai_chover = 1 THEN 'Verdadeiro Positivo'
+            WHEN o.precipitation = 0  AND u.pred_vai_chover = 0 THEN 'Verdadeiro Negativo'
+            WHEN o.precipitation > 0  AND u.pred_vai_chover = 0 THEN 'Falso Negativo'
+            WHEN o.precipitation = 0  AND u.pred_vai_chover = 1 THEN 'Falso Positivo'
+        END                                          AS resultado_classificacao
+    FROM ultima u
+    JOIN weather_pipeline.silver.weather_clean o
+      ON o.observation_time = u.target_time AND o.is_forecast = false
+    WHERE u.rn = 1
+""")
 print(f"\nResumo das próximas 24h:")
 display(spark.sql(f"""
     SELECT
