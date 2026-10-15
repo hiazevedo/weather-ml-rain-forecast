@@ -207,8 +207,9 @@ print("Gráfico 2 gerado")
 
 # COMMAND ----------
 
-# Registrar melhor modelo no MLflow Registry
-print("Registrando melhor modelo no MLflow Registry...\n")
+# Logar o melhor modelo (run final) no MLflow Tracking.
+# O registro no Unity Catalog e o alias champion são feitos pelo 06_retrain_model.
+print("Logando melhor modelo no MLflow...\n")
 
 MODEL_NAME = "rain-forecast-birigui"
 
@@ -237,18 +238,18 @@ with mlflow.start_run(run_name="BestModel_RF_v2_FINAL") as run:
         "recall":    recall_score(y_clf_test, y_pred_best_t),
         "precision": precision_score(y_clf_test, y_pred_best_t)
     })
-    # input_example e registered_model_name removidos — não suportados no Serverless Free Edition
+    # input_example removido — causa CONFIG_NOT_AVAILABLE no Serverless
     mlflow.sklearn.log_model(rf_best, "model")
     run_id = run.info.run_id
 
 print(f"""
-MODELO REGISTRADO NO MLFLOW
+MODELO LOGADO NO MLFLOW
 
 Modelo   : RandomForestClassifier (class_weight=balanced)
 AUC-ROC  : 0.9318
 Recall   : 0.7367 — detecta 73.7% das chuvas reais
 Threshold: {best_t:.2f} (otimizado para F1)
-Registry : {MODEL_NAME}
+Registry : workspace.default.rain-forecast-birigui (via 06_retrain_model)
 Run ID   : {run_id[:32]}...
 """)
-print("   Próximo passo: 05_batch_inference.py")
+print("   Próximo passo: 06_retrain_model.py (registrar/promover champion) e depois 05_batch_inference.py")

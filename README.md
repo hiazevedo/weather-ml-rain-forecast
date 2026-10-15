@@ -12,7 +12,7 @@
 
 ## 📌 Sobre o projeto
 
-Pipeline completo de Machine Learning que utiliza **755.491 registros horários** (1940→2026) para treinar modelos de previsão de chuva para Birigui-SP. Compara XGBoost, RandomForest e Prophet, registra o melhor modelo no MLflow Registry e executa inferência automática a cada 6 horas via Databricks Workflows, alimentando um dashboard em tempo real.
+Pipeline completo de Machine Learning que utiliza **755.491 registros horários** (1940→2026) para treinar modelos de previsão de chuva para Birigui-SP. Compara XGBoost, RandomForest e Prophet, versiona os modelos no Model Registry do Unity Catalog (alias `champion`) e executa inferência automática a cada 6 horas via Databricks Workflows, alimentando um dashboard em tempo real.
 
 ---
 
@@ -53,12 +53,13 @@ Pipeline completo de Machine Learning que utiliza **755.491 registros horários*
            ▼
 [04_model_evaluation.py]
   Matriz confusão + ROC + Feature Importance
-  → MLflow Registry: rain-forecast-birigui v1
+  → loga o run BestModel_RF_v2_FINAL no MLflow Tracking
            │
            ▼
 [05_batch_inference.py]          [06_retrain_model.py]
   Predições próximas 24h           Retreino mensal
-  → gold.rain_forecast_ml          → Registry v2, v3...
+  (modelo @champion)               → nova versão no Registry
+  → gold.rain_forecast_ml          → promove @champion se F1 ≥ atual
 ```
 
 ---
@@ -131,8 +132,15 @@ O modelo é retreinado **1x por mês** via Job separado:
   update_features  ← atualiza feature store incremental
        │
   retrain_model    ← retreina com histórico completo
-                   → registra nova versão no MLflow Registry
+                   → registra nova versão no Model Registry (UC)
+                   → promove o alias `champion` se o F1 não piorar
 ```
+
+**Regra de promoção:** o modelo novo é comparado ao `champion` atual **no mesmo
+conjunto de teste** (últimos 24 meses — a janela muda a cada mês, então comparar
+com o F1 histórico não seria justo). Se `F1_novo >= F1_champion`, o alias passa
+para a nova versão; caso contrário a versão fica registrada, mas a inferência
+continua usando o champion anterior.
 
 ---
 
@@ -173,13 +181,34 @@ databricks bundle deploy
 
 ---
 
-## MLflow Registry
+## Model Registry (Unity Catalog)
+
+Modelo: `workspace.default.rain-forecast-birigui`
 
 ```
-rain-forecast-birigui
-├── v1  → BestModel_RF_v2_FINAL   (treinado manualmente)
-└── v2  → RF_Retrain_Monthly      (primeiro retreino mensal)
+├── v1–v5  → março/2026 (registros manuais, anteriores ao fluxo champion)
+├── v6     → RF_Retrain_Monthly  (15/10/2026 — retreino com dados deduplicados)
+└── v7     → RF_Retrain_Monthly  (15/10/2026) ← @champion
 ```
+
+- O `06_retrain_model` registra cada retreino e decide a promoção do alias.
+- O `05_batch_inference` carrega `models:/workspace.default.rain-forecast-birigui@champion`
+  e grava a versão usada na coluna `modelo` de `gold.rain_forecast_ml`.
+- **Sem fallback:** se o champion não puder ser carregado, o notebook falha com
+  erro explícito (antes, treinava em silêncio um modelo reduzido).
+- Em um ambiente novo, rode o `06_retrain_model` **antes** do `05` para criar o
+  primeiro champion.
+
+### Notas do Serverless (MLflow 3.x)
+
+- É necessário `mlflow.set_tracking_uri("databricks")` e
+  `mlflow.set_registry_uri("databricks-uc")` antes de qualquer chamada; sem isso
+  o MLflow lê `spark.mlflow.modelRegistryUri`, bloqueada no Spark Connect
+  (`CONFIG_NOT_AVAILABLE`).
+- O Unity Catalog exige **signature** no modelo (`infer_signature`);
+  `input_example` segue evitado (mesmo erro de configuração).
+- No MLflow 3 o `log_model` cria um *LoggedModel* (`models:/m-…`), e não o
+  artefato `runs:/<run_id>/model` do MLflow 2 — não use `runs:/` para carregar.
 
 ---
 
@@ -244,9 +273,9 @@ Ou execute os notebooks manualmente na ordem:
 01_feature_engineering.py    # Feature engineering (~10 min — 755k registros)
 02_exploratory_analysis.py   # EDA (opcional)
 03_model_training.py         # Treinar modelos (~30 min)
-04_model_evaluation.py       # Avaliar e registrar no MLflow
-05_batch_inference.py        # Rodar inferência
-06_retrain_model.py          # Configurar retreino mensal
+04_model_evaluation.py       # Avaliar e logar o run final no MLflow
+06_retrain_model.py          # Registrar versão e promover @champion (antes do 05)
+05_batch_inference.py        # Rodar inferência com o @champion
 ```
 
 ### Unity Catalog

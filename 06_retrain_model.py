@@ -167,5 +167,5 @@ else:
        F1      : {f1:.4f}
        Precision: {prec:.4f} | Recall: {rec:.4f}
        AUC-ROC : {auc:.4f}
-       Versão  : nova versão registrada no MLflow
+       Versão  : v{mv.version} registrada | champion {'PROMOVIDO' if promote else 'mantido'}
     """)

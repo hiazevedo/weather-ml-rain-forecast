@@ -25,8 +25,8 @@ from prophet import Prophet
 
 # COMMAND ----------
 
-# Workaround obrigatório no Databricks Free Edition Serverless:
-# autolog tenta registrar no Model Registry, que não está disponível neste tier
+# autolog desabilitado: o registro de modelos é explícito e feito pelo
+# 06_retrain_model (Unity Catalog, alias champion)
 mlflow.autolog(disable=True)
 
 # Serverless (runtime 19.x): sem URIs explícitos o MLflow tenta ler a config
