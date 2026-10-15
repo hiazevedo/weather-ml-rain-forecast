@@ -166,7 +166,7 @@ O projeto configura **2 Jobs** via Asset Bundle (`databricks.yml`):
 
 ```
 [weather-ml] Pipeline Completo (manual)
-  feature_engineering → model_training → model_evaluation → batch_inference
+  feature_engineering → model_training → model_evaluation → retrain_model → batch_inference
 
 [weather-ml] Retreinamento Mensal
   Schedule: dia 1 de cada mês às 03h

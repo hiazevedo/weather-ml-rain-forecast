@@ -39,9 +39,18 @@ resources:
             notebook_path: ${workspace.file_path}/04_model_evaluation
             source: WORKSPACE
 
-        - task_key: batch_inference
+        # Registra a versão no Unity Catalog e promove @champion (se F1 não piorar);
+        # o batch_inference carrega models:/...@champion
+        - task_key: retrain_model
           depends_on:
             - task_key: model_evaluation
+          notebook_task:
+            notebook_path: ${workspace.file_path}/06_retrain_model
+            source: WORKSPACE
+
+        - task_key: batch_inference
+          depends_on:
+            - task_key: retrain_model
           notebook_task:
             notebook_path: ${workspace.file_path}/05_batch_inference
             source: WORKSPACE
