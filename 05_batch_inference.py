@@ -24,7 +24,6 @@ FORECAST_TABLE     = "weather_pipeline.silver.weather_forecast"
 PREDICTIONS_TABLE  = "weather_pipeline.gold.rain_forecast_ml"
 HISTORY_TABLE      = "weather_pipeline.gold.rain_forecast_ml_history"
 ACCURACY_VIEW      = "weather_pipeline.gold.rain_model_accuracy_hourly"
-BEST_THRESHOLD     = 0.65
 MODEL_NAME         = "rain-forecast-birigui"
 UC_MODEL_NAME      = "workspace.default.rain-forecast-birigui"
 
@@ -46,7 +45,6 @@ TZ_BR = pytz.timezone("America/Sao_Paulo")
 agora = datetime.now(TZ_BR)
 print(f"   Configurações carregadas")
 print(f"   Data/Hora  : {agora.strftime('%Y-%m-%d %H:%M')} (Brasília)")
-print(f"   Threshold  : {BEST_THRESHOLD}")
 print(f"   Modelo     : {UC_MODEL_NAME}@champion")
 
 # COMMAND ----------
@@ -70,6 +68,13 @@ except Exception as e:
     ) from e
 
 MODEL_VERSION = mv_champion.version
+# Limiar de decisão escolhido pelo 06_retrain_model e gravado na versão do modelo
+if "threshold" not in mv_champion.tags:
+    raise RuntimeError(
+        f"{UC_MODEL_NAME} v{MODEL_VERSION} não tem a tag 'threshold'. "
+        f"Retreine com 06_retrain_model ou defina a tag na versão.")
+BEST_THRESHOLD = float(mv_champion.tags["threshold"])
+print(f"   Limiar     : {BEST_THRESHOLD} (tag da versão)")
 print(f"   Modelo carregado | {UC_MODEL_NAME} v{MODEL_VERSION} (@champion) "
       f"| run_id: {mv_champion.run_id}")
 
@@ -304,7 +309,7 @@ MODELO
   Nome       : RandomForestClassifier
   AUC-ROC    : 0.9318
   Recall     : 73.7% das chuvas detectadas
-  Threshold  : {BEST_THRESHOLD} (otimizado para F1)
+  Threshold  : {BEST_THRESHOLD} (tag da versão — máx. F1 na calibração)
   Registry   : {UC_MODEL_NAME} v{MODEL_VERSION}
 
 PREVISÃO PRÓXIMAS 24H — BIRIGUI-SP
