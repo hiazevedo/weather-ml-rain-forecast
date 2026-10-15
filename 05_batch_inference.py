@@ -140,6 +140,23 @@ X_pred = df_next24.select(MODEL_FEATURES).toPandas()
 y_prob  = model.predict_proba(X_pred)[:, 1]
 y_pred  = (y_prob >= BEST_THRESHOLD).astype(int)
 
+# Modelo REGIONAL (rótulo = chuva medida pelo INMET), em paralelo ao champion.
+# Se falhar, as previsões do champion são gravadas mesmo assim e o notebook
+# falha no final (alerta por e-mail) — sem falha silenciosa e sem perder a
+# previsão principal.
+REGIONAL_MODEL_NAME = "workspace.default.rain-forecast-regional-inmet"
+erro_regional, p_reg, thr_reg, versao_reg = None, None, None, None
+try:
+    mv_reg = client.get_model_version_by_alias(REGIONAL_MODEL_NAME, "champion")
+    reg_model = mlflow.sklearn.load_model(f"models:/{REGIONAL_MODEL_NAME}@champion")
+    thr_reg, versao_reg = float(mv_reg.tags["threshold"]), mv_reg.version
+    p_reg = reg_model.predict_proba(
+        df_next24.select(list(reg_model.feature_names_in_)).toPandas())[:, 1]
+    print(f"   Regional   : {REGIONAL_MODEL_NAME} v{versao_reg} (limiar {thr_reg})")
+except Exception as e:
+    erro_regional = f"{type(e).__name__}: {e}"
+    print(f"   ⚠️ Modelo regional indisponível — {erro_regional}")
+
 # Adicionar predições ao dataframe
 times_pd = df_next24.select("observation_time", "temperature_2m",
     "apparent_temperature", "relative_humidity",
@@ -162,6 +179,13 @@ results_pd["target_time"]      = results_pd["observation_time"] + pd.Timedelta(h
 results_pd["inferencia_local"] = pd.Timestamp(agora_local)  # hora local, comparável a target_time
 results_pd["threshold_usado"]  = BEST_THRESHOLD
 results_pd["modelo"]           = f"{MODEL_NAME} v{MODEL_VERSION}"
+# Chance de chuva MEDIDA (modelo regional INMET); tipos fixos mesmo se ele falhar
+results_pd["prob_chuva_medida"]  = (p_reg.round(4) if p_reg is not None else np.nan)
+results_pd["pred_chuva_medida"]  = ((p_reg >= thr_reg).astype("float64") if p_reg is not None else np.nan)
+results_pd["threshold_regional"] = thr_reg if thr_reg is not None else np.nan
+results_pd["modelo_regional"]    = f"rain-forecast-regional-inmet v{versao_reg}" if versao_reg else ""
+for c in ("prob_chuva_medida", "pred_chuva_medida", "threshold_regional"):
+    results_pd[c] = results_pd[c].astype("float64")
 results_pd["inferencia_at"]    = datetime.now(timezone.utc).isoformat()
 
 # Converter para Spark e salvar
@@ -181,8 +205,12 @@ spark.sql(f"""
     CREATE TABLE IF NOT EXISTS {HISTORY_TABLE} AS
     SELECT * FROM _novas_predicoes WHERE 1 = 0
 """)
-if "api_precip_alvo" not in spark.table(HISTORY_TABLE).columns:
-    spark.sql(f"ALTER TABLE {HISTORY_TABLE} ADD COLUMNS (api_precip_alvo DOUBLE)")
+NOVAS_COLUNAS = {"api_precip_alvo": "DOUBLE", "prob_chuva_medida": "DOUBLE", "pred_chuva_medida": "DOUBLE",
+                 "threshold_regional": "DOUBLE", "modelo_regional": "STRING"}
+existentes = set(spark.table(HISTORY_TABLE).columns)
+for col, tipo in NOVAS_COLUNAS.items():
+    if col not in existentes:
+        spark.sql(f"ALTER TABLE {HISTORY_TABLE} ADD COLUMNS ({col} {tipo})")
 spark.sql(f"""
     MERGE INTO {HISTORY_TABLE} h
     USING _novas_predicoes n
@@ -283,33 +311,18 @@ resumo = spark.sql(f"""
 vai_chover = resumo["horas_com_chuva_prevista"] > 0
 
 print(f"""
-WEATHER ML RAIN FORECAST — RELATÓRIO FINAL
-MODELO
-  Nome       : RandomForestClassifier
-  AUC-ROC    : 0.9318
-  Recall     : 73.7% das chuvas detectadas
-  Threshold  : {BEST_THRESHOLD} (tag da versão — máx. F1 na calibração)
-  Registry   : {UC_MODEL_NAME} v{MODEL_VERSION}
+WEATHER ML RAIN FORECAST — RELATÓRIO
+MODELOS
+  Champion   : {UC_MODEL_NAME} v{MODEL_VERSION} | limiar {BEST_THRESHOLD} | {len(MODEL_FEATURES)} features
+  Regional   : {REGIONAL_MODEL_NAME + f" v{versao_reg} | limiar {thr_reg}" if versao_reg else "indisponível"}
 
-PREVISÃO PRÓXIMAS 24H — BIRIGUI-SP
+PREVISÃO PRÓXIMAS 24H — BIRIGUI-SP (champion)
   Vai chover?          : {'SIM 🌧️' if vai_chover else 'NÃO ☀️'}
   Horas com chuva      : {resumo['horas_com_chuva_prevista'] or 0:>5} / {resumo['total_horas']}
   Probabilidade média  : {resumo['prob_media_pct']:>5.1f}%
   Probabilidade máxima : {resumo['prob_maxima_pct']:>5.1f}%
   Primeira chuva       : {str(resumo['primeira_chuva_prevista'] or 'N/A'):>8}
-
-DADOS
-  Histórico  : 1940→2026 (87 anos, 755k registros)
-  Features   : 31 features engenheiradas
-  Treino     : 1940–2022 | Teste: 2024–2026
 """)
-print("  PROJETO SEMANA 5 CONCLUÍDO!")
-print("\n   Notebooks entregues:")
-for nb in [
-    "01_feature_engineering.py  — 31 features + Feature Store Delta",
-    "02_exploratory_analysis.py — EDA + correlações + heatmap hora×mês",
-    "03_model_training.py       — XGBoost + RF + Prophet com MLflow",
-    "04_model_evaluation.py     — Matriz confusão + ROC + Feature Importance",
-    "05_batch_inference.py      — Predições 24h → gold.rain_forecast_ml",
-]:
-    print(f"   ✅ {nb}")
+
+if erro_regional:
+    raise RuntimeError(f"Previsões do champion gravadas, mas o modelo regional falhou: {erro_regional}")

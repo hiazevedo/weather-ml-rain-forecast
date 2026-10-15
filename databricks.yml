@@ -82,3 +82,10 @@ resources:
           notebook_task:
             notebook_path: ${workspace.file_path}/06_retrain_model
             source: WORKSPACE
+
+        # Modelo regional (rótulo = chuva medida pelo INMET), em paralelo ao champion
+        - task_key: train_regional
+          max_retries: 1
+          notebook_task:
+            notebook_path: ${workspace.file_path}/13_train_regional_inmet
+            source: WORKSPACE

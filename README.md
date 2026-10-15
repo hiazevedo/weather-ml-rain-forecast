@@ -178,7 +178,8 @@ weather-ml-rain-forecast/
 ├── 09_experiment_mos.py         # Experimento: MOS com previsões arquivadas
 ├── 10_experiment_fonte_historica.py # Experimento: ERA5 puro vs série mista
 ├── 11_experiment_inmet_validacao.py # Validação com chuva medida (INMET) — roda no job semanal
-└── 12_experiment_regional_inmet.py  # Experimento: modelo regional treinado com chuva medida
+├── 12_experiment_regional_inmet.py  # Experimento: modelo regional treinado com chuva medida
+└── 13_train_regional_inmet.py       # Treino mensal do modelo regional (chuva medida, INMET)
 ```
 
 ---
@@ -223,6 +224,23 @@ Modelo: `workspace.default.rain-forecast-birigui`
   erro explícito (antes, treinava em silêncio um modelo reduzido).
 - Em um ambiente novo, rode o `06_retrain_model` **antes** do `05` para criar o
   primeiro champion.
+
+### Modelo regional — chuva medida (INMET)
+
+Modelo: `workspace.default.rain-forecast-regional-inmet` (alias `@champion`), em
+paralelo ao champion — não o substitui.
+
+- **Rótulo:** chuva > 0 no pluviômetro das estações automáticas do INMET num raio
+  de 80 km (José Bonifácio, Valparaíso, Tupã, Lins) na hora seguinte.
+- **Features:** as mesmas 46 do champion, do Open-Meteo no ponto de cada estação.
+- **Avaliação:** deixando cada estação de fora (Birigui não tem estação), nos
+  últimos 12 meses. v1: F1 0,423 contra chuva medida (champion: 0,345), AUC 0,891,
+  limiar 0,70. Métricas em `gold.rain_regional_versions`.
+- **Treino:** `13_train_regional_inmet`, mensal (task `train_regional` do job de
+  retreino); a nova versão vira champion regional se o F1 não cair mais de 0,02.
+- **Produção:** o `05_batch_inference` grava `prob_chuva_medida` /
+  `pred_chuva_medida` ao lado da previsão do champion. Se o regional falhar, a
+  previsão do champion é gravada e o notebook falha no final (alerta).
 
 ### Notas do Serverless (MLflow 3.x)
 
