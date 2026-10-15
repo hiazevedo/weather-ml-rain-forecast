@@ -51,42 +51,67 @@ print(f"   Modelo     : {MODEL_NAME} v1")
 # Carregar modelo mais recente do experimento MLflow (sem Model Registry)
 print("Carregando modelo do MLflow...\n")
 
-from sklearn.ensemble import RandomForestClassifier
-
 CURRENT_USER    = spark.sql("SELECT current_user()").collect()[0][0]
 EXPERIMENT_NAME = f"/Users/{CURRENT_USER}/weather-ml-rain-forecast"
 
+# Sem fallback: se o modelo não puder ser carregado, o notebook falha.
+# (Antes, qualquer erro aqui treinava em silêncio um RF reduzido — 100 árvores,
+# profundidade 10, 2018-2022, 50% de amostra — e publicava previsões piores
+# sem nenhum aviso.)
 try:
     runs = mlflow.search_runs(
         experiment_names=[EXPERIMENT_NAME],
         filter_string="params.type = 'classifier'",
         order_by=["start_time DESC"],
     )
-    if runs.empty:
-        raise ValueError("Nenhum run de classificador encontrado")
-
-    run_id = runs.iloc[0]["run_id"]
-    model  = mlflow.sklearn.load_model(f"runs:/{run_id}/model")
-    print(f"   Modelo carregado do MLflow | run_id: {run_id}")
 except Exception as e:
-    print(f"   Experimento não encontrado ({e}) — retreinando com subset...")
-    # Fallback: treinar nos últimos 5 anos com amostragem (evita OOM no serverless)
-    df_train = spark.table(FEATURE_TABLE) \
-        .filter(F.col("observation_time") >= "2018-01-01") \
-        .filter(F.col("observation_time") <  "2023-01-01") \
-        .dropna(subset=ML_FEATURES + ["target_will_rain"]) \
-        .sample(fraction=0.5, seed=42)
+    raise RuntimeError(
+        f"Falha ao consultar o experimento MLflow '{EXPERIMENT_NAME}': "
+        f"{type(e).__name__}: {e}"
+    ) from e
 
-    X_train = df_train.select(ML_FEATURES).toPandas()
-    y_train = df_train.select("target_will_rain").toPandas().values.ravel()
-
-    model = RandomForestClassifier(
-        n_estimators=100, max_depth=10,
-        class_weight="balanced",
-        random_state=42, n_jobs=-1
+if runs.empty:
+    raise RuntimeError(
+        f"Nenhum run de classificador (params.type='classifier') encontrado em "
+        f"'{EXPERIMENT_NAME}'. Execute 03_model_training ou 06_retrain_model antes."
     )
-    model.fit(X_train, y_train)
-    print(f"   Modelo retreinado | registros de treino: {len(X_train):,}")
+
+run_id = runs.iloc[0]["run_id"]
+
+
+def load_classifier(run_id: str):
+    """Carrega o modelo de um run, nos dois formatos de armazenamento do MLflow.
+
+    - MLflow 2.x (Serverless env <= 2): artefato do run -> runs:/<run_id>/model
+    - MLflow 3.x (Serverless env >= 5): o modelo vira um LoggedModel
+      (models:/m-...) e NÃO existe em runs:/<run_id>/model (404).
+    """
+    client = mlflow.tracking.MlflowClient()
+    exp_id = runs.iloc[0]["experiment_id"]
+
+    # 1) MLflow 3: LoggedModel gerado por este run
+    if hasattr(client, "search_logged_models"):
+        logged = [m for m in client.search_logged_models(experiment_ids=[exp_id])
+                  if getattr(m, "source_run_id", None) == run_id]
+        if logged:
+            logged.sort(key=lambda m: m.creation_timestamp, reverse=True)
+            uri = f"models:/{logged[0].model_id}"
+            return mlflow.sklearn.load_model(uri), uri
+
+    # 2) MLflow 2: artefato do run
+    uri = f"runs:/{run_id}/model"
+    return mlflow.sklearn.load_model(uri), uri
+
+
+try:
+    model, model_uri = load_classifier(run_id)
+except Exception as e:
+    raise RuntimeError(
+        f"Falha ao carregar o modelo do run {run_id}: {type(e).__name__}: {e}"
+    ) from e
+
+print(f"   Modelo carregado do MLflow | {model_uri} | run_id: {run_id} "
+      f"({runs.iloc[0].get('tags.mlflow.runName')})")
 
 # COMMAND ----------
 
