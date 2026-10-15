@@ -77,7 +77,7 @@ print(f"   Modelo carregado | {UC_MODEL_NAME} v{MODEL_VERSION} (@champion) "
 
 # DBTITLE 1,Cell 3: Fixed IndentationError
 # =============================================================================
-# CÉLULA 3 CORRIGIDA — sem windspeed no forecast
+# Features das próximas horas: histórico recente observado + previsão
 # =============================================================================
 import math
 
@@ -95,13 +95,14 @@ df_hist_recent = spark.table("weather_pipeline.silver.weather_clean") \
         "hour", "month", "weekday"
     )
 
+# windspeed vem da previsão (antes era fixado em 0.0, mas o modelo foi
+# treinado com vento real — todas as previsões futuras viam "vento zero")
 df_forecast_raw = spark.table(FORECAST_TABLE) \
     .select(
         "observation_time", "temperature_2m", "apparent_temperature",
-        "precipitation", "relative_humidity",
+        "precipitation", "relative_humidity", "windspeed",
         "hour", "month"
     ) \
-    .withColumn("windspeed", F.lit(0.0)) \
     .withColumn("weekday", F.dayofweek("observation_time"))
 
 # Combinar histórico recente + forecast
@@ -116,6 +117,8 @@ w = Window.orderBy("observation_time")
 
 df_with_features = (
     df_combined
+    # Chuva que a API prevê para a hora-alvo (t+1): baseline para comparar com o modelo
+    .withColumn("api_precip_alvo",   F.lead("precipitation", 1).over(w))
     .withColumn("temp_lag_1h",       F.lag("temperature_2m", 1).over(w))
     .withColumn("temp_lag_3h",       F.lag("temperature_2m", 3).over(w))
     .withColumn("temp_lag_24h",      F.lag("temperature_2m", 24).over(w))
@@ -159,11 +162,12 @@ df_with_features = (
 # Filtrar apenas as próximas 24h do forecast.
 # observation_time é hora LOCAL sem fuso: comparar com current_timestamp() (UTC)
 # deslocava a janela em 3h. Usamos a hora local (naive) no mesmo formato.
+# A linha da hora cheia atual (t0, já observada) prevê t0+1 — a próxima hora.
 agora_local = datetime.now(TZ_BR).strftime("%Y-%m-%d %H:%M:%S")
-t0 = F.lit(agora_local).cast("timestamp")
+t0 = F.lit(datetime.now(TZ_BR).strftime("%Y-%m-%d %H:00:00")).cast("timestamp")
 df_next24 = df_with_features \
-    .filter(F.col("observation_time") > t0) \
-    .filter(F.col("observation_time") <= t0 + F.expr("INTERVAL 24 HOURS")) \
+    .filter(F.col("observation_time") >= t0) \
+    .filter(F.col("observation_time") <  t0 + F.expr("INTERVAL 24 HOURS")) \
     .dropna(subset=ML_FEATURES)
 
 total = df_next24.count()
@@ -183,7 +187,8 @@ y_pred  = (y_prob >= BEST_THRESHOLD).astype(int)
 # Adicionar predições ao dataframe
 times_pd = df_next24.select("observation_time", "temperature_2m",
     "apparent_temperature", "relative_humidity",
-    "hour", "month").toPandas()
+    "hour", "month", "api_precip_alvo").toPandas()
+times_pd["api_precip_alvo"] = times_pd["api_precip_alvo"].astype("float64")
 
 results_pd = times_pd.copy()
 results_pd["prob_chuva"]      = y_prob.round(4)
@@ -220,6 +225,8 @@ spark.sql(f"""
     CREATE TABLE IF NOT EXISTS {HISTORY_TABLE} AS
     SELECT * FROM _novas_predicoes WHERE 1 = 0
 """)
+if "api_precip_alvo" not in spark.table(HISTORY_TABLE).columns:
+    spark.sql(f"ALTER TABLE {HISTORY_TABLE} ADD COLUMNS (api_precip_alvo DOUBLE)")
 spark.sql(f"""
     MERGE INTO {HISTORY_TABLE} h
     USING _novas_predicoes n
@@ -244,6 +251,8 @@ spark.sql(f"""
         u.pred_vai_chover,
         u.threshold_usado,
         u.modelo,
+        u.api_precip_alvo,
+        CAST(u.api_precip_alvo > 0 AS INT)           AS api_vai_chover,
         o.precipitation                              AS chuva_real_mm,
         CAST(o.precipitation > 0 AS INT)             AS choveu,
         CASE
