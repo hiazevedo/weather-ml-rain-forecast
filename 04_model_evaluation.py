@@ -1,4 +1,8 @@
 # Databricks notebook source
+# MAGIC %run ./features
+
+# COMMAND ----------
+
 import mlflow
 import mlflow.sklearn
 import os
@@ -43,19 +47,7 @@ mlflow.set_experiment(EXPERIMENT_NAME)
 
 FEATURE_TABLE = "weather_pipeline.gold.rain_features"
 
-ML_FEATURES = [
-    "temperature_2m", "apparent_temperature",
-    "precipitation", "relative_humidity", "windspeed",
-    "temp_lag_1h", "temp_lag_3h", "temp_lag_24h",
-    "precip_lag_1h", "precip_lag_3h", "precip_lag_24h",
-    "humidity_lag_1h", "humidity_lag_3h",
-    "temp_delta_1h", "humidity_delta_1h", "precip_delta_1h",
-    "temp_rolling_6h", "humidity_rolling_6h",
-    "precip_rolling_3h", "precip_rolling_6h", "precip_rolling_24h",
-    "hour_sin", "hour_cos", "month_sin", "month_cos",
-    "hour", "month", "weekday",
-    "is_rainy_season", "is_peak_rain_month", "is_afternoon",
-]
+# ML_FEATURES vem de ./features (variante B: base + extras)
 TARGET_CLF = "target_will_rain"
 TARGET_REG = "target_rain_next_1h"
 

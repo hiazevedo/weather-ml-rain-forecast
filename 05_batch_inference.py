@@ -1,4 +1,8 @@
 # Databricks notebook source
+# MAGIC %run ./features
+
+# COMMAND ----------
+
 # Configurações
 import mlflow
 import mlflow.sklearn
@@ -27,19 +31,8 @@ ACCURACY_VIEW      = "weather_pipeline.gold.rain_model_accuracy_hourly"
 MODEL_NAME         = "rain-forecast-birigui"
 UC_MODEL_NAME      = "workspace.default.rain-forecast-birigui"
 
-ML_FEATURES = [
-    "temperature_2m", "apparent_temperature",
-    "precipitation", "relative_humidity", "windspeed",
-    "temp_lag_1h", "temp_lag_3h", "temp_lag_24h",
-    "precip_lag_1h", "precip_lag_3h", "precip_lag_24h",
-    "humidity_lag_1h", "humidity_lag_3h",
-    "temp_delta_1h", "humidity_delta_1h", "precip_delta_1h",
-    "temp_rolling_6h", "humidity_rolling_6h",
-    "precip_rolling_3h", "precip_rolling_6h", "precip_rolling_24h",
-    "hour_sin", "hour_cos", "month_sin", "month_cos",
-    "hour", "month", "weekday",
-    "is_rainy_season", "is_peak_rain_month", "is_afternoon",
-]
+# As features vêm de ./features; as colunas que o modelo espera vêm do
+# próprio modelo (feature_names_in_), então a inferência acompanha o champion.
 
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 agora = datetime.now(TZ_BR)
@@ -94,20 +87,12 @@ PI = math.pi
 df_hist_recent = spark.table("weather_pipeline.silver.weather_clean") \
     .filter(F.col("is_forecast") == False) \
     .filter(F.col("observation_time") >= F.date_sub(F.current_timestamp(), 3)) \
-    .select(
-        "observation_time", "temperature_2m", "apparent_temperature",
-        "precipitation", "relative_humidity", "windspeed",
-        "hour", "month", "weekday"
-    )
+    .select(*SILVER_COLS)
 
 # windspeed vem da previsão (antes era fixado em 0.0, mas o modelo foi
 # treinado com vento real — todas as previsões futuras viam "vento zero")
 df_forecast_raw = spark.table(FORECAST_TABLE) \
-    .select(
-        "observation_time", "temperature_2m", "apparent_temperature",
-        "precipitation", "relative_humidity", "windspeed",
-        "hour", "month"
-    ) \
+    .select(*[c for c in SILVER_COLS if c != "weekday"]) \
     .withColumn("weekday", F.dayofweek("observation_time"))
 
 # Combinar histórico recente + forecast
@@ -121,48 +106,13 @@ from pyspark.sql import Window
 w = Window.orderBy("observation_time")
 
 df_with_features = (
-    df_combined
+    add_features(df_combined, w)
     # Chuva que a API prevê para a hora-alvo (t+1): baseline para comparar com o modelo
-    .withColumn("api_precip_alvo",   F.lead("precipitation", 1).over(w))
-    .withColumn("temp_lag_1h",       F.lag("temperature_2m", 1).over(w))
-    .withColumn("temp_lag_3h",       F.lag("temperature_2m", 3).over(w))
-    .withColumn("temp_lag_24h",      F.lag("temperature_2m", 24).over(w))
-    .withColumn("precip_lag_1h",     F.lag("precipitation", 1).over(w))
-    .withColumn("precip_lag_3h",     F.lag("precipitation", 3).over(w))
-    .withColumn("precip_lag_24h",    F.lag("precipitation", 24).over(w))
-    .withColumn("humidity_lag_1h",   F.lag("relative_humidity", 1).over(w))
-    .withColumn("humidity_lag_3h",   F.lag("relative_humidity", 3).over(w))
-    .withColumn("temp_delta_1h",
-        F.col("temperature_2m") - F.lag("temperature_2m", 1).over(w))
-    .withColumn("humidity_delta_1h",
-        F.col("relative_humidity") - F.lag("relative_humidity", 1).over(w))
-    .withColumn("precip_delta_1h",
-        F.col("precipitation") - F.lag("precipitation", 1).over(w))
-    .withColumn("temp_rolling_6h",
-        F.round(F.avg("temperature_2m").over(w.rowsBetween(-5, 0)), 3))
-    .withColumn("humidity_rolling_6h",
-        F.round(F.avg("relative_humidity").over(w.rowsBetween(-5, 0)), 3))
-    .withColumn("precip_rolling_3h",
-        F.round(F.sum("precipitation").over(w.rowsBetween(-2, 0)), 3))
-    .withColumn("precip_rolling_6h",
-        F.round(F.sum("precipitation").over(w.rowsBetween(-5, 0)), 3))
-    .withColumn("precip_rolling_24h",
-        F.round(F.sum("precipitation").over(w.rowsBetween(-23, 0)), 3))
-    .withColumn("hour_sin",
-        F.round(F.sin(F.col("hour") * (2 * PI / 24)), 6))
-    .withColumn("hour_cos",
-        F.round(F.cos(F.col("hour") * (2 * PI / 24)), 6))
-    .withColumn("month_sin",
-        F.round(F.sin(F.col("month") * (2 * PI / 12)), 6))
-    .withColumn("month_cos",
-        F.round(F.cos(F.col("month") * (2 * PI / 12)), 6))
-    .withColumn("is_rainy_season",
-        F.when(F.col("month").isin(10,11,12,1,2,3), 1).otherwise(0))
-    .withColumn("is_peak_rain_month",
-        F.when(F.col("month").isin(1,2,12), 1).otherwise(0))
-    .withColumn("is_afternoon",
-        F.when(F.col("hour").between(12, 18), 1).otherwise(0))
+    .withColumn("api_precip_alvo", F.lead("precipitation", 1).over(w))
 )
+
+MODEL_FEATURES = list(model.feature_names_in_)
+print(f"   Modelo usa {len(MODEL_FEATURES)} features")
 
 # Filtrar apenas as próximas 24h do forecast.
 # observation_time é hora LOCAL sem fuso: comparar com current_timestamp() (UTC)
@@ -173,7 +123,7 @@ t0 = F.lit(datetime.now(TZ_BR).strftime("%Y-%m-%d %H:00:00")).cast("timestamp")
 df_next24 = df_with_features \
     .filter(F.col("observation_time") >= t0) \
     .filter(F.col("observation_time") <  t0 + F.expr("INTERVAL 24 HOURS")) \
-    .dropna(subset=ML_FEATURES)
+    .dropna(subset=MODEL_FEATURES)
 
 total = df_next24.count()
 print(f"✅ Features preparadas: {total} horas para previsão")
@@ -183,7 +133,7 @@ print(f"✅ Features preparadas: {total} horas para previsão")
 # Rodar inferência e salvar predições
 print("🔮 Rodando inferência...\n")
 
-X_pred = df_next24.select(ML_FEATURES).toPandas()
+X_pred = df_next24.select(MODEL_FEATURES).toPandas()
 
 # Predições
 y_prob  = model.predict_proba(X_pred)[:, 1]

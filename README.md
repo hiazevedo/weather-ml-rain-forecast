@@ -86,7 +86,11 @@ Apesar do XGBoost ter F1 ligeiramente maior, o RandomForest v2 tem **recall supe
 
 ---
 
-## Feature Engineering — 31 features
+## Feature Engineering — 46 features (variante B)
+
+Definidas num único lugar, o notebook `features.py` (lista `ML_FEATURES` e
+função `add_features`), usado via `%run ./features` por 01, 03, 04, 05, 06 e 07.
+A inferência usa as colunas que o próprio champion espera (`feature_names_in_`).
 
 | Grupo | Features | Técnica |
 |-------|----------|---------|
@@ -95,6 +99,17 @@ Apesar do XGBoost ter F1 ligeiramente maior, o RandomForest v2 tem **recall supe
 | **Rolling** | temp/humidity rolling 6h, precip rolling 3h/6h/24h | Média/soma móvel |
 | **Cíclicas** | hour_sin/cos, month_sin/cos | Encoding cíclico |
 | **Flags** | is_rainy_season, is_peak_rain_month, is_afternoon | Domínio climatológico |
+| **Umidade/estabilidade** | dew_point_2m, dewpoint_depression, tcwv, tcwv_delta_3h, boundary_layer_height | Variáveis extras do ERA5 |
+| **Pressão** | pressure_msl, pressure_tend_3h, pressure_tend_24h | Tendência de pressão (frentes) |
+| **Nuvens/vento** | cloud_cover (total/low/mid/high), cloud_low_delta_1h, wind_dir_sin/cos | Camadas e direção |
+
+### Experimentos (`gold.ml_experiments`)
+
+| Notebook | Pergunta | Resultado |
+|---|---|---|
+| `08_experiment_extra_features` | Variáveis extras do ERA5 e o ENSO ajudam? | Extras: F1 0,690 → 0,705, AUC 0,917 → 0,943 (adotado). ENSO: sem ganho na escala horária |
+| `09_experiment_mos` | Corrigir a previsão com previsões arquivadas (MOS)? | A 1 dia: API 0,526 · champion 0,517 · MOS 0,528; a 2 dias: MOS 0,548 — aguardando mais dados |
+| `10_experiment_fonte_historica` | Treinar com ERA5 puro ou com a série mista (ERA5 → IFS em 2018)? | Empate no que a produção vê (F1 0,7015 vs 0,7042) — mantida a série mista (`best_match`), mesma fonte das horas recentes |
 
 **Top 5 features por correlação com target:**
 ```
@@ -149,13 +164,17 @@ continua usando o champion anterior.
 ```
 weather-ml-rain-forecast/
 ├── databricks.yml               # Databricks Asset Bundle — 2 Jobs configurados
-├── 01_feature_engineering.py    # 31 features + Feature Store Delta
+├── features.py                  # Definição única das features (variante B)
+├── 01_feature_engineering.py    # Feature Store Delta (gold.rain_features)
 ├── 02_exploratory_analysis.py   # EDA + correlações + heatmap hora×mês
 ├── 03_model_training.py         # XGBoost + RF + Prophet com MLflow
 ├── 04_model_evaluation.py       # Matriz confusão + ROC + Registry
 ├── 05_batch_inference.py        # Predições 24h → gold.rain_forecast_ml
 ├── 06_retrain_model.py          # Retreino mensal automático
-└── 07_update_features.py        # Atualização incremental feature store
+├── 07_update_features.py        # Atualização incremental feature store
+├── 08_experiment_extra_features.py  # Experimento: extras do ERA5 + ENSO
+├── 09_experiment_mos.py         # Experimento: MOS com previsões arquivadas
+└── 10_experiment_fonte_historica.py # Experimento: ERA5 puro vs série mista
 ```
 
 ---
@@ -188,7 +207,9 @@ Modelo: `workspace.default.rain-forecast-birigui`
 ```
 ├── v1–v5  → março/2026 (registros manuais, anteriores ao fluxo champion)
 ├── v6     → RF_Retrain_Monthly  (15/10/2026 — retreino com dados deduplicados)
-└── v7     → RF_Retrain_Monthly  (15/10/2026) ← @champion
+├── v7     → RF_Retrain_Monthly  (15/10/2026) — 31 features, limiar 0,65, F1 0,687
+├── v8     → RF_Retrain_Monthly  (15/10/2026) — não promovido (F1 0,683 < v7)
+└── v9     → RF_Retrain_Monthly  (15/10/2026) — variante B, 46 features, limiar 0,55, F1 0,709 ← @champion
 ```
 
 - O `06_retrain_model` registra cada retreino e decide a promoção do alias.

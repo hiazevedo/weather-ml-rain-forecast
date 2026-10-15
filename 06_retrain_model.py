@@ -1,4 +1,8 @@
 # Databricks notebook source
+# MAGIC %run ./features
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ### Roda mensalmente — adiciona dados do mês anterior ao treino
 
@@ -30,19 +34,7 @@ mlflow.set_experiment(EXPERIMENT_NAME)
 
 UC_MODEL_NAME = "workspace.default.rain-forecast-birigui"
 
-ML_FEATURES = [
-    "temperature_2m", "apparent_temperature",
-    "precipitation", "relative_humidity", "windspeed",
-    "temp_lag_1h", "temp_lag_3h", "temp_lag_24h",
-    "precip_lag_1h", "precip_lag_3h", "precip_lag_24h",
-    "humidity_lag_1h", "humidity_lag_3h",
-    "temp_delta_1h", "humidity_delta_1h", "precip_delta_1h",
-    "temp_rolling_6h", "humidity_rolling_6h",
-    "precip_rolling_3h", "precip_rolling_6h", "precip_rolling_24h",
-    "hour_sin", "hour_cos", "month_sin", "month_cos",
-    "hour", "month", "weekday",
-    "is_rainy_season", "is_peak_rain_month", "is_afternoon",
-]
+# ML_FEATURES vem de ./features (variante B: base + extras)
 
 print(" Verificando se retreinamento é necessário...\n")
 
@@ -173,8 +165,11 @@ else:
         champ_model = mlflow.sklearn.load_model(
             f"models:/{UC_MODEL_NAME}@champion")
         champ_thr = float(champion.tags["threshold"])
+        # o champion pode usar outro conjunto de features (ex.: v7 = 31 base)
+        champ_feats = list(champ_model.feature_names_in_)
+        X_test_champ = test_df.select(champ_feats).toPandas()
         f1_champion = f1_score(
-            y_test, (champ_model.predict_proba(X_test)[:, 1] >= champ_thr).astype(int))
+            y_test, (champ_model.predict_proba(X_test_champ)[:, 1] >= champ_thr).astype(int))
         promote = f1 >= f1_champion
         motivo = (f"F1 novo {f1:.4f} (limiar {threshold:.2f}) vs champion "
                   f"v{champion.version} {f1_champion:.4f} (limiar {champ_thr:.2f}), mesmo teste")
@@ -199,7 +194,7 @@ else:
     # Champion mantido: atualiza as métricas dele com a avaliação de hoje
     # (mesmo teste, limiar dele), para o dashboard comparar com a produção.
     if not promote:
-        p_ch = champ_model.predict_proba(X_test)[:, 1]
+        p_ch = champ_model.predict_proba(X_test_champ)[:, 1]
         y_ch = (p_ch >= champ_thr).astype(int)
         spark.createDataFrame([(
             int(champion.version), float(f1_champion),
