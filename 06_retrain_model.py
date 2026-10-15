@@ -8,6 +8,7 @@ from pyspark.sql import functions as F
 from sklearn.ensemble import RandomForestClassifier
 import mlflow
 import mlflow.sklearn
+from mlflow.models import infer_signature
 import os
 
 # COMMAND ----------
@@ -26,6 +27,8 @@ EXPERIMENT_NAME = "/Users/{}/weather-ml-rain-forecast".format(
     spark.sql("SELECT current_user()").collect()[0][0]
 )
 mlflow.set_experiment(EXPERIMENT_NAME)
+
+UC_MODEL_NAME = "workspace.default.rain-forecast-birigui"
 
 ML_FEATURES = [
     "temperature_2m", "apparent_temperature",
@@ -117,8 +120,46 @@ else:
         })
         mlflow.log_metrics({"f1": f1, "auc_roc": auc, "accuracy": acc,
                             "precision": prec, "recall": rec})
-        # input_example e registered_model_name removidos — não suportados no Serverless Free Edition
-        mlflow.sklearn.log_model(model, "model")
+        # Unity Catalog exige signature para registrar o modelo.
+        # input_example segue removido — causa CONFIG_NOT_AVAILABLE no Serverless.
+        signature = infer_signature(X_test.head(100), y_pred[:100])
+        model_info = mlflow.sklearn.log_model(model, "model", signature=signature)
+        run_id = run.info.run_id
+
+    # ------------------------------------------------------------------
+    # Model Registry (Unity Catalog): registra a versão e promove o alias
+    # "champion" só se o F1 não piorar frente ao champion atual, avaliado
+    # no MESMO conjunto de teste (a janela de teste muda a cada mês).
+    # ------------------------------------------------------------------
+    from mlflow.exceptions import MlflowException
+    client = mlflow.tracking.MlflowClient()
+
+    mv = mlflow.register_model(model_info.model_uri, UC_MODEL_NAME)
+    client.set_model_version_tag(UC_MODEL_NAME, mv.version, "run_id", run_id)
+    client.set_model_version_tag(UC_MODEL_NAME, mv.version, "f1", f"{f1:.4f}")
+
+    try:
+        champion = client.get_model_version_by_alias(UC_MODEL_NAME, "champion")
+    except MlflowException as e:
+        if e.error_code != "RESOURCE_DOES_NOT_EXIST":
+            raise
+        champion = None
+
+    if champion is None:
+        promote, f1_champion = True, None
+        motivo = "ainda não existe champion"
+    else:
+        champ_model = mlflow.sklearn.load_model(
+            f"models:/{UC_MODEL_NAME}@champion")
+        f1_champion = f1_score(y_test, champ_model.predict(X_test))
+        promote = f1 >= f1_champion
+        motivo = (f"F1 novo {f1:.4f} vs champion v{champion.version} "
+                  f"{f1_champion:.4f} (mesmo teste)")
+
+    if promote:
+        client.set_registered_model_alias(UC_MODEL_NAME, "champion", mv.version)
+    print(f"   Versão registrada : {UC_MODEL_NAME} v{mv.version}")
+    print(f"   Champion          : {'PROMOVIDA' if promote else 'mantido'} — {motivo}")
 
     print(f"""
        RETREINAMENTO CONCLUÍDO!

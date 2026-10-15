@@ -24,6 +24,7 @@ FORECAST_TABLE     = "weather_pipeline.silver.weather_forecast"
 PREDICTIONS_TABLE  = "weather_pipeline.gold.rain_forecast_ml"
 BEST_THRESHOLD     = 0.65
 MODEL_NAME         = "rain-forecast-birigui"
+UC_MODEL_NAME      = "workspace.default.rain-forecast-birigui"
 
 ML_FEATURES = [
     "temperature_2m", "apparent_temperature",
@@ -44,74 +45,31 @@ agora = datetime.now(TZ_BR)
 print(f"   Configurações carregadas")
 print(f"   Data/Hora  : {agora.strftime('%Y-%m-%d %H:%M')} (Brasília)")
 print(f"   Threshold  : {BEST_THRESHOLD}")
-print(f"   Modelo     : {MODEL_NAME} v1")
+print(f"   Modelo     : {UC_MODEL_NAME}@champion")
 
 # COMMAND ----------
 
-# Carregar modelo mais recente do experimento MLflow (sem Model Registry)
-print("Carregando modelo do MLflow...\n")
-
-CURRENT_USER    = spark.sql("SELECT current_user()").collect()[0][0]
-EXPERIMENT_NAME = f"/Users/{CURRENT_USER}/weather-ml-rain-forecast"
-
+# Carregar o modelo "champion" do Model Registry (Unity Catalog).
+# O alias é promovido pelo 06_retrain_model apenas quando o F1 não piora.
 # Sem fallback: se o modelo não puder ser carregado, o notebook falha.
 # (Antes, qualquer erro aqui treinava em silêncio um RF reduzido — 100 árvores,
 # profundidade 10, 2018-2022, 50% de amostra — e publicava previsões piores
 # sem nenhum aviso.)
+print("Carregando modelo champion do Model Registry...\n")
+
+client = mlflow.tracking.MlflowClient()
 try:
-    runs = mlflow.search_runs(
-        experiment_names=[EXPERIMENT_NAME],
-        filter_string="params.type = 'classifier'",
-        order_by=["start_time DESC"],
-    )
+    mv_champion = client.get_model_version_by_alias(UC_MODEL_NAME, "champion")
+    model = mlflow.sklearn.load_model(f"models:/{UC_MODEL_NAME}@champion")
 except Exception as e:
     raise RuntimeError(
-        f"Falha ao consultar o experimento MLflow '{EXPERIMENT_NAME}': "
-        f"{type(e).__name__}: {e}"
+        f"Falha ao carregar '{UC_MODEL_NAME}@champion': {type(e).__name__}: {e}. "
+        f"Execute 06_retrain_model para registrar/promover uma versão."
     ) from e
 
-if runs.empty:
-    raise RuntimeError(
-        f"Nenhum run de classificador (params.type='classifier') encontrado em "
-        f"'{EXPERIMENT_NAME}'. Execute 03_model_training ou 06_retrain_model antes."
-    )
-
-run_id = runs.iloc[0]["run_id"]
-
-
-def load_classifier(run_id: str):
-    """Carrega o modelo de um run, nos dois formatos de armazenamento do MLflow.
-
-    - MLflow 2.x (Serverless env <= 2): artefato do run -> runs:/<run_id>/model
-    - MLflow 3.x (Serverless env >= 5): o modelo vira um LoggedModel
-      (models:/m-...) e NÃO existe em runs:/<run_id>/model (404).
-    """
-    client = mlflow.tracking.MlflowClient()
-    exp_id = runs.iloc[0]["experiment_id"]
-
-    # 1) MLflow 3: LoggedModel gerado por este run
-    if hasattr(client, "search_logged_models"):
-        logged = [m for m in client.search_logged_models(experiment_ids=[exp_id])
-                  if getattr(m, "source_run_id", None) == run_id]
-        if logged:
-            logged.sort(key=lambda m: m.creation_timestamp, reverse=True)
-            uri = f"models:/{logged[0].model_id}"
-            return mlflow.sklearn.load_model(uri), uri
-
-    # 2) MLflow 2: artefato do run
-    uri = f"runs:/{run_id}/model"
-    return mlflow.sklearn.load_model(uri), uri
-
-
-try:
-    model, model_uri = load_classifier(run_id)
-except Exception as e:
-    raise RuntimeError(
-        f"Falha ao carregar o modelo do run {run_id}: {type(e).__name__}: {e}"
-    ) from e
-
-print(f"   Modelo carregado do MLflow | {model_uri} | run_id: {run_id} "
-      f"({runs.iloc[0].get('tags.mlflow.runName')})")
+MODEL_VERSION = mv_champion.version
+print(f"   Modelo carregado | {UC_MODEL_NAME} v{MODEL_VERSION} (@champion) "
+      f"| run_id: {mv_champion.run_id}")
 
 # COMMAND ----------
 
@@ -233,7 +191,7 @@ results_pd["alerta_chuva"] = results_pd["prob_chuva"].apply(
         "🟢 SEM CHUVA"
 )
 results_pd["threshold_usado"]  = BEST_THRESHOLD
-results_pd["modelo"]           = MODEL_NAME
+results_pd["modelo"]           = f"{MODEL_NAME} v{MODEL_VERSION}"
 results_pd["inferencia_at"]    = datetime.now(timezone.utc).isoformat()
 
 # Converter para Spark e salvar
@@ -284,7 +242,7 @@ MODELO
   AUC-ROC    : 0.9318
   Recall     : 73.7% das chuvas detectadas
   Threshold  : {BEST_THRESHOLD} (otimizado para F1)
-  Registry   : {MODEL_NAME}
+  Registry   : {UC_MODEL_NAME} v{MODEL_VERSION}
 
 PREVISÃO PRÓXIMAS 24H — BIRIGUI-SP
   Vai chover?          : {'SIM 🌧️' if vai_chover else 'NÃO ☀️'}
