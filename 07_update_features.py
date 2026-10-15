@@ -20,19 +20,16 @@ ultima_data = spark.sql(f"""
 
 print(f"   Última data na feature store : {ultima_data}")
 
-# Buscar apenas registros novos da Silver
+# Fonte única: Silver (já deduplicada por observation_time). Pegamos 48h de
+# contexto ANTES do ponto de corte + os registros novos, tudo da mesma tabela,
+# para que os lags/rolling (calculados por posição de linha) sejam consistentes.
 df_novos = spark.table(SILVER_TABLE) \
     .filter(F.col("is_forecast") == False) \
     .filter(F.col("observation_time") > ultima_data) \
     .filter(F.col("precipitation").isNotNull()) \
     .filter(F.col("temperature_2m").isNotNull()) \
     .filter(F.col("relative_humidity").isNotNull()) \
-    .select(
-        "observation_time", "temperature_2m",
-        "apparent_temperature", "precipitation",
-        "rain", "relative_humidity", "windspeed",
-        "year", "month", "day", "hour", "weekday"
-    )
+    .dropDuplicates(["observation_time"])
 
 novos_count = df_novos.count()
 print(f"   Novos registros encontrados  : {novos_count:,}")
@@ -41,30 +38,26 @@ if novos_count == 0:
     print("\n Nenhum dado novo — feature store já atualizada!")
     dbutils.notebook.exit("UP_TO_DATE")
 
-# COMMAND ----------t
+# COMMAND ----------
 
 # Calcular features com contexto histórico
 print("Calculando features...\n")
 
-# Pegar últimas 24h da feature store para calcular lags corretamente
-# Pegar contexto da feature store
-df_contexto = spark.table(FEATURE_TABLE) \
-    .filter(F.col("observation_time") > F.date_sub(
-        F.lit(ultima_data), 2)) \
-    .select(
-        "observation_time", "temperature_2m",
-        "apparent_temperature", "precipitation",
-        "relative_humidity", "windspeed",
-        "year", "month", "day", "hour", "weekday"
-    )
+COLS = ["observation_time", "temperature_2m", "apparent_temperature",
+        "precipitation", "relative_humidity", "windspeed",
+        "year", "month", "day", "hour", "weekday"]
 
-# df_novos já vem da Silver com year e day — garantir mesmo select
-df_novos_clean = df_novos.select(
-    "observation_time", "temperature_2m",
-    "apparent_temperature", "precipitation",
-    "relative_humidity", "windspeed",
-    "year", "month", "day", "hour", "weekday"
-)
+df_contexto = spark.table(SILVER_TABLE) \
+    .filter(F.col("is_forecast") == False) \
+    .filter(F.col("observation_time") <= ultima_data) \
+    .filter(F.col("observation_time") > F.expr(f"timestamp'{ultima_data}' - INTERVAL 48 HOURS")) \
+    .filter(F.col("precipitation").isNotNull()) \
+    .filter(F.col("temperature_2m").isNotNull()) \
+    .filter(F.col("relative_humidity").isNotNull()) \
+    .dropDuplicates(["observation_time"]) \
+    .select(*COLS)
+
+df_novos_clean = df_novos.select(*COLS)
 
 df_combined = df_contexto.unionByName(df_novos_clean) \
     .orderBy("observation_time")
@@ -101,6 +94,7 @@ df_features = (
     # Filtrar apenas os registros novos (remover contexto)
     .filter(F.col("observation_time") > ultima_data)
     .filter(F.col("temp_lag_24h").isNotNull())
+    .filter(F.col("precip_lag_24h").isNotNull())
     .filter(F.col("target_rain_next_1h").isNotNull())
 )
 

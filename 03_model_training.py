@@ -29,6 +29,11 @@ from prophet import Prophet
 # autolog tenta registrar no Model Registry, que não está disponível neste tier
 mlflow.autolog(disable=True)
 
+# Serverless (runtime 19.x): sem URIs explícitos o MLflow tenta ler a config
+# spark.mlflow.modelRegistryUri, bloqueada no Spark Connect (CONFIG_NOT_AVAILABLE)
+mlflow.set_tracking_uri("databricks")
+mlflow.set_registry_uri("databricks-uc")
+
 # MLflow storage via UC Volume (necessário no Serverless)
 MLFLOW_TMP = "/Volumes/weather_pipeline/bronze/mlflow_tmp"
 os.environ["MLFLOW_DFS_TMP"] = MLFLOW_TMP

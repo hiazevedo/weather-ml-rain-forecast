@@ -14,6 +14,11 @@ import os
 
 mlflow.autolog(disable=True)
 
+# Serverless (runtime 19.x): sem URIs explícitos o MLflow tenta ler a config
+# spark.mlflow.modelRegistryUri, bloqueada no Spark Connect (CONFIG_NOT_AVAILABLE)
+mlflow.set_tracking_uri("databricks")
+mlflow.set_registry_uri("databricks-uc")
+
 MLFLOW_TMP = "/Volumes/weather_pipeline/bronze/mlflow_tmp"
 os.environ["MLFLOW_DFS_TMP"] = MLFLOW_TMP
 
@@ -82,7 +87,8 @@ else:
     y_test  = test_df.select("target_will_rain") \
                      .toPandas().values.ravel()
 
-    from sklearn.metrics import f1_score, roc_auc_score
+    from sklearn.metrics import (f1_score, roc_auc_score, accuracy_score,
+                             precision_score, recall_score)
     from sklearn.ensemble import RandomForestClassifier
 
     with mlflow.start_run(run_name="RF_Retrain_Monthly") as run:
@@ -97,6 +103,9 @@ else:
         y_prob = model.predict_proba(X_test)[:, 1]
 
         f1  = f1_score(y_test, y_pred)
+        acc = accuracy_score(y_test, y_pred)
+        prec = precision_score(y_test, y_pred)
+        rec  = recall_score(y_test, y_pred)
         auc = roc_auc_score(y_test, y_prob)
 
         mlflow.log_params({
@@ -106,13 +115,16 @@ else:
             "train_size":   len(X_train),
             "test_size":    len(X_test),
         })
-        mlflow.log_metrics({"f1": f1, "auc_roc": auc})
+        mlflow.log_metrics({"f1": f1, "auc_roc": auc, "accuracy": acc,
+                            "precision": prec, "recall": rec})
         # input_example e registered_model_name removidos — não suportados no Serverless Free Edition
         mlflow.sklearn.log_model(model, "model")
 
     print(f"""
        RETREINAMENTO CONCLUÍDO!
+       Accuracy: {acc:.4f}
        F1      : {f1:.4f}
+       Precision: {prec:.4f} | Recall: {rec:.4f}
        AUC-ROC : {auc:.4f}
        Versão  : nova versão registrada no MLflow
     """)
