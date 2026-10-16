@@ -12,7 +12,7 @@
 
 ## 📌 Sobre o projeto
 
-Pipeline completo de Machine Learning que utiliza **755.491 registros horários** (1940→2026) para treinar modelos de previsão de chuva para Birigui-SP. Compara XGBoost, RandomForest e Prophet, versiona os modelos no Model Registry do Unity Catalog (alias `champion`) e executa inferência automática a cada 6 horas via Databricks Workflows, alimentando um dashboard em tempo real.
+Pipeline completo de Machine Learning que utiliza **755.491 registros horários** (1940→2026) para treinar modelos de previsão de chuva para Birigui-SP. Compara XGBoost, RandomForest e Prophet, versiona os modelos no Model Registry do Unity Catalog (alias `champion`) e executa inferência automática a cada hora via Databricks Workflows, alimentando um dashboard em tempo real.
 
 ---
 
@@ -260,8 +260,8 @@ paralelo ao champion — não o substitui.
 O notebook `05_batch_inference.py` roda automaticamente dentro do pipeline de previsão:
 
 ```
-Weather Birigui - Previsao + ML (6h)
-  Schedule: 00h, 06h, 12h, 18h (Brasília)
+[weather] Pipeline Completo (1h)
+  Schedule: a cada hora cheia (Brasília)
 
   coleta_previsao  ← coleta API Open-Meteo
        │
@@ -288,7 +288,7 @@ Weather Birigui - Previsao + ML (6h)
 | **Spark ML** | Feature engineering distribuído |
 | **Delta Lake** | Feature Store + Predictions table |
 | **Databricks Asset Bundles** | 2 Jobs como código |
-| **Databricks Workflows** | Inferência 4x/dia + retreino mensal |
+| **Databricks Workflows** | Inferência de hora em hora + retreino mensal |
 
 ---
 
