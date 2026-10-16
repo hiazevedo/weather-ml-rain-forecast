@@ -55,10 +55,12 @@ resources:
             notebook_path: ${workspace.file_path}/05_batch_inference
             source: WORKSPACE
 
+    # Dia 1 às 03h30, no meio da hora: o job de 1h do weather-dlt-pipeline roda
+    # na hora cheia e também atualiza a gold.rain_features (update_features).
     weather_ml_retrain:
       name: "[weather-ml] Retreinamento Mensal"
       schedule:
-        quartz_cron_expression: "0 0 3 1 * ?"
+        quartz_cron_expression: "0 30 3 1 * ?"
         timezone_id: "America/Sao_Paulo"
         pause_status: UNPAUSED
 

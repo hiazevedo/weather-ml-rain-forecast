@@ -144,7 +144,7 @@ O modelo é retreinado **1x por mês** via Job separado:
 
 ```
 [weather-ml] Retreinamento Mensal
-  Schedule: dia 1 de cada mês às 03h (Brasília)
+  Schedule: dia 1 de cada mês às 03h30 (Brasília; no meio da hora, longe do job de 1h)
 
   update_features  ← atualiza feature store incremental
        │
@@ -193,7 +193,7 @@ O projeto configura **2 Jobs** via Asset Bundle (`databricks.yml`):
   feature_engineering → model_training → model_evaluation → retrain_model → batch_inference
 
 [weather-ml] Retreinamento Mensal
-  Schedule: dia 1 de cada mês às 03h
+  Schedule: dia 1 de cada mês às 03h30
   update_features → retrain_model
 ```
 
