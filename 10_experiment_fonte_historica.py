@@ -82,7 +82,7 @@ bm = spark.sql(f"""
            c.relative_humidity, c.windspeed, x.* EXCEPT (observation_time)
     FROM weather_pipeline.silver.weather_clean c
     JOIN weather_pipeline.silver.era5_extra_hourly x USING (observation_time)
-    WHERE NOT c.is_forecast AND c.observation_time < DATE'{fim + timedelta(days=1)}'
+    WHERE c.observation_time <= from_utc_timestamp(current_timestamp(), 'America/Sao_Paulo') AND c.observation_time < DATE'{fim + timedelta(days=1)}'
 """).toPandas()
 bm["observation_time"] = pd.to_datetime(bm["observation_time"])
 print(f"best_match: {len(bm):,} horas")

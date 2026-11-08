@@ -51,7 +51,7 @@ CHAMP_FEATURES = [
 prev = spark.table("weather_pipeline.silver.forecast_previous_runs").toPandas()
 obs = spark.sql("""
     SELECT observation_time, precipitation AS chuva_obs
-    FROM weather_pipeline.silver.weather_clean WHERE is_forecast = false
+    FROM weather_pipeline.silver.weather_clean WHERE observation_time <= from_utc_timestamp(current_timestamp(), 'America/Sao_Paulo')
 """).toPandas()
 oni = spark.sql("""
     SELECT available_month AS mes, oni FROM weather_pipeline.silver.enso_oni

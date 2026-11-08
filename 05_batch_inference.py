@@ -86,7 +86,7 @@ PI = math.pi
 
 # Pegar dados históricos recentes para calcular lags
 df_hist_recent = spark.table("weather_pipeline.silver.weather_clean") \
-    .filter(F.col("is_forecast") == False) \
+    .filter(F.col("observation_time") <= F.from_utc_timestamp(F.current_timestamp(), "America/Sao_Paulo")) \
     .filter(F.col("observation_time") >= F.date_sub(F.current_timestamp(), 3)) \
     .select(*SILVER_COLS)
 
@@ -219,7 +219,7 @@ spark.sql(f"""
 """)
 
 # Acurácia real por hora: última previsão feita ANTES da hora-alvo vs chuva
-# observada (silver.weather_clean com is_forecast = false).
+# observada (silver.weather_clean com observation_time <= from_utc_timestamp(current_timestamp(), 'America/Sao_Paulo')).
 spark.sql(f"""
     CREATE OR REPLACE VIEW {ACCURACY_VIEW} AS
     WITH ultima AS (
@@ -247,7 +247,7 @@ spark.sql(f"""
         END                                          AS resultado_classificacao
     FROM ultima u
     JOIN weather_pipeline.silver.weather_clean o
-      ON o.observation_time = u.target_time AND o.is_forecast = false
+      ON o.observation_time = u.target_time AND o.observation_time <= from_utc_timestamp(current_timestamp(), 'America/Sao_Paulo')
     WHERE u.rn = 1
 """)
 
@@ -275,7 +275,7 @@ spark.sql(f"""
         CAST(o.precipitation > 0 AS INT)             AS choveu
     FROM {HISTORY_TABLE} h
     JOIN weather_pipeline.silver.weather_clean o
-      ON o.observation_time = h.target_time AND o.is_forecast = false
+      ON o.observation_time = h.target_time AND o.observation_time <= from_utc_timestamp(current_timestamp(), 'America/Sao_Paulo')
     WHERE h.inferencia_local < h.target_time
 """)
 print(f"\nResumo das próximas 24h:")

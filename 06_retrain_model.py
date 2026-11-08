@@ -49,7 +49,7 @@ novos = spark.sql(f"""
     SELECT COUNT(*) AS total
     FROM weather_pipeline.silver.weather_clean
     WHERE observation_time > '{ultimo_treino}'
-      AND is_forecast = false
+      AND observation_time <= from_utc_timestamp(current_timestamp(), 'America/Sao_Paulo')
 """).collect()[0][0]
 
 print(f"   Último treino : {ultimo_treino}")

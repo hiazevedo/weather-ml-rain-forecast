@@ -28,7 +28,7 @@ print(f"   Última data na feature store : {ultima_data}")
 # contexto ANTES do ponto de corte + os registros novos, tudo da mesma tabela,
 # para que os lags/rolling (calculados por posição de linha) sejam consistentes.
 df_novos = spark.table(SILVER_TABLE) \
-    .filter(F.col("is_forecast") == False) \
+    .filter(F.col("observation_time") <= F.from_utc_timestamp(F.current_timestamp(), "America/Sao_Paulo")) \
     .filter(F.col("observation_time") > ultima_data) \
     .filter(F.col("precipitation").isNotNull()) \
     .filter(F.col("temperature_2m").isNotNull()) \
@@ -50,7 +50,7 @@ print("Calculando features...\n")
 COLS = SILVER_COLS   # de ./features
 
 df_contexto = spark.table(SILVER_TABLE) \
-    .filter(F.col("is_forecast") == False) \
+    .filter(F.col("observation_time") <= F.from_utc_timestamp(F.current_timestamp(), "America/Sao_Paulo")) \
     .filter(F.col("observation_time") <= ultima_data) \
     .filter(F.col("observation_time") > F.expr(f"timestamp'{ultima_data}' - INTERVAL 48 HOURS")) \
     .filter(F.col("precipitation").isNotNull()) \

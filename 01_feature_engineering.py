@@ -22,7 +22,7 @@ import math
 print("Carregando dados históricos...\n")
 
 df = spark.table(SILVER_TABLE) \
-    .filter(F.col("is_forecast") == False) \
+    .filter(F.col("observation_time") <= F.from_utc_timestamp(F.current_timestamp(), "America/Sao_Paulo")) \
     .filter(F.col("precipitation").isNotNull()) \
     .filter(F.col("temperature_2m").isNotNull()) \
     .filter(F.col("relative_humidity").isNotNull()) \
