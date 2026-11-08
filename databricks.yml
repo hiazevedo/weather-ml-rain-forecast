@@ -91,3 +91,32 @@ resources:
           notebook_task:
             notebook_path: ${workspace.file_path}/13_train_regional_inmet
             source: WORKSPACE
+
+        # MOS multimodelo (6 modelos → chuva medida pelo INMET), usado pelo job a cada 3 h
+        - task_key: train_mos
+          max_retries: 1
+          notebook_task:
+            notebook_path: ${workspace.file_path}/16_train_mos_multimodelo
+            source: WORKSPACE
+
+    # Chance de chuva MEDIDA nas próximas 48 h combinando 6 modelos (Forecast API).
+    # A cada 3 h, no minuto 20 (fora da hora cheia do job de 1h e do vigia, no :40);
+    # os modelos globais rodam a cada 6–12 h, então de hora em hora não acrescentaria nada.
+    weather_ml_mos:
+      name: "[weather-ml] MOS multimodelo (a cada 3 h)"
+      schedule:
+        quartz_cron_expression: "0 20 */3 * * ?"
+        timezone_id: "America/Sao_Paulo"
+        pause_status: UNPAUSED
+
+      email_notifications:
+        on_failure:
+          - ${workspace.current_user.userName}
+
+      tasks:
+        - task_key: inference_mos
+          max_retries: 2
+          min_retry_interval_millis: 120000
+          notebook_task:
+            notebook_path: ${workspace.file_path}/17_inference_mos_multimodelo
+            source: WORKSPACE

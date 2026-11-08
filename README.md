@@ -183,14 +183,17 @@ weather-ml-rain-forecast/
 ├── 12_experiment_regional_inmet.py  # Experimento: modelo regional treinado com chuva medida
 ├── 13_train_regional_inmet.py       # Treino mensal do modelo regional (chuva medida, INMET)
 ├── 14_experiment_mos_multimodelo.py # Experimento: MOS com 6 modelos (Previous Runs) contra a API
-└── 15_experiment_merge_validacao.py # Experimento: MERGE/CPTEC como chuva medida para Birigui
+├── 15_experiment_merge_validacao.py # Experimento: MERGE/CPTEC como chuva medida para Birigui
+├── mos.py                           # Features do MOS multimodelo (definição única)
+├── 16_train_mos_multimodelo.py      # Treino mensal do MOS multimodelo (versões no Volume)
+└── 17_inference_mos_multimodelo.py  # MOS: chance de chuva medida nas próximas 48 h (a cada 3 h)
 ```
 
 ---
 
 ## Databricks Jobs
 
-O projeto configura **2 Jobs** via Asset Bundle (`databricks.yml`):
+O projeto configura **3 Jobs** via Asset Bundle (`databricks.yml`):
 
 ```
 [weather-ml] Pipeline Completo (manual)
@@ -198,7 +201,11 @@ O projeto configura **2 Jobs** via Asset Bundle (`databricks.yml`):
 
 [weather-ml] Retreinamento Mensal
   Schedule: dia 1 de cada mês às 03h30
-  update_features → retrain_model
+  update_features → retrain_model   ·   train_regional   ·   train_mos
+
+[weather-ml] MOS multimodelo (a cada 3 h)
+  Schedule: a cada 3 h, no minuto 20
+  inference_mos  ← 6 modelos da Forecast API → gold.rain_forecast_mos
 ```
 
 Para fazer o deploy:
@@ -211,14 +218,25 @@ databricks bundle deploy
 
 ## Model Registry (Unity Catalog)
 
-Modelo: `workspace.default.rain-forecast-birigui`
+Os três modelos ficam registrados no Unity Catalog pelo MLflow (Catalog Explorer →
+`workspace` → `default` → Models). Cada um tem o alias `@champion`, que a inferência
+carrega, e o limiar de decisão na tag `threshold` da versão.
+
+| Modelo | O que prevê | Champion (nov/2026) | Treino |
+|---|---|---|---|
+| `workspace.default.rain-forecast-birigui` | Chuva na próxima hora (rótulo Open-Meteo) | v10 — F1 0,718, limiar 0,50 | `06_retrain_model`, mensal |
+| `workspace.default.rain-forecast-regional-inmet` | Chuva **medida** na próxima hora | v2 — F1 0,423 (estação fora), limiar 0,70 | `13_train_regional_inmet`, mensal |
+| `workspace.default.rain-forecast-mos-multimodelo` | Chuva **medida** nas próximas 48 h, combinando 6 modelos | v2 — F1 0,309 (API 0,259), limiar 0,125 | `16_train_mos_multimodelo`, mensal |
+
+Histórico do `rain-forecast-birigui`:
 
 ```
 ├── v1–v5  → março/2026 (registros manuais, anteriores ao fluxo champion)
 ├── v6     → RF_Retrain_Monthly  (15/10/2026 — retreino com dados deduplicados)
 ├── v7     → RF_Retrain_Monthly  (15/10/2026) — 31 features, limiar 0,65, F1 0,687
 ├── v8     → RF_Retrain_Monthly  (15/10/2026) — não promovido (F1 0,683 < v7)
-└── v9     → RF_Retrain_Monthly  (15/10/2026) — variante B, 46 features, limiar 0,55, F1 0,709 ← @champion
+├── v9     → RF_Retrain_Monthly  (15/10/2026) — variante B, 46 features, limiar 0,55, F1 0,709
+└── v10    → RF_Retrain_Monthly  (01/11/2026) — limiar 0,50, F1 0,718 ← @champion
 ```
 
 - O `06_retrain_model` registra cada retreino e decide a promoção do alias.
@@ -246,8 +264,40 @@ paralelo ao champion — não o substitui.
   `pred_chuva_medida` ao lado da previsão do champion. Se o regional falhar, a
   previsão do champion é gravada e o notebook falha no final (alerta).
 
+### MOS multimodelo — chuva medida combinando 6 modelos
+
+Terceira previsão, ao lado do champion e do regional, para as **próximas 48 h**
+(no painel: "Amanhã — chuva medida" e a linha "6 modelos" no gráfico de 48 h).
+
+- **Rótulo:** chuva > 0 no pluviômetro das 4 estações do INMET (como o regional).
+- **Features** (`mos.py`, 35): a previsão de cada um dos 6 modelos (ECMWF IFS, GFS,
+  ICON, JMA, GEM e best_match) para a hora e as vizinhas, nuvens, umidade, CAPE e o
+  consenso entre eles, mais hora e mês. No treino vêm da rodada de 1 dia antes
+  (Previous Runs API); em produção, da previsão atual (Forecast API).
+- **Avaliação:** cada estação fora do treino, nos últimos 12 meses com rótulo, contra
+  a previsão crua da API nas mesmas horas. v2 (08/11/2026): F1 **0,309** contra 0,259
+  da API, AUC 0,837, limiar 12,5% (chuva medida em 6,6% das horas do teste).
+- **Treino:** `16_train_mos_multimodelo`, mensal (task `train_mos`). Uma versão só é
+  promovida se bater a API e o F1 não cair mais de 0,02 em relação à promovida atual.
+- **Produção:** `17_inference_mos_multimodelo`, a cada 3 h → `gold.rain_forecast_mos`
+  (última previsão) e `gold.rain_forecast_mos_history` (todas, para medir o acerto).
+  A resposta crua da Open-Meteo fica no Volume `bronze.forecast_multimodelo`.
+- **Registro:** no Unity Catalog, `workspace.default.rain-forecast-mos-multimodelo`
+  (alias `@champion`, limiar na tag `threshold`); métricas por versão também em
+  `gold.rain_mos_versions` (painel). A v1 foi treinada numa execução avulsa e não carrega no ambiente do job
+  (ver as notas abaixo); a v2 é a primeira treinada pelo próprio job.
+- **Limite:** o modelo aprendeu com a rodada de 1 dia antes; nas primeiras horas a
+  antecedência é menor e o acerto medido pode não valer igual.
+
 ### Notas do Serverless (MLflow 3.x)
 
+- **Execução avulsa ≠ job:** uma execução avulsa (`jobs submit`, sem ambiente
+  definido) roda num ambiente serverless mais antigo, com MLflow 2.11, que não
+  consegue registrar modelos no Unity Catalog (upload negado, S3 AccessDenied) e
+  tem outra versão do scikit-learn. Um modelo treinado ali não carrega no job
+  (`Can't get attribute '__pyx_unpickle_…'`). Treine sempre pelo job — para rodar
+  só uma task: `databricks jobs run-now --json '{"job_id": …, "only": ["train_mos"]}'`.
+  O 16 e o 17 instalam `mlflow>=3.1` para não depender disso no registro.
 - É necessário `mlflow.set_tracking_uri("databricks")` e
   `mlflow.set_registry_uri("databricks-uc")` antes de qualquer chamada; sem isso
   o MLflow lê `spark.mlflow.modelRegistryUri`, bloqueada no Spark Connect
