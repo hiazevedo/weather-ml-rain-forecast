@@ -112,6 +112,8 @@ A inferência usa as colunas que o próprio champion espera (`feature_names_in_`
 | `10_experiment_fonte_historica` | Treinar com ERA5 puro ou com a série mista (ERA5 → IFS em 2018)? | Empate no que a produção vê (F1 0,7015 vs 0,7042) — mantida a série mista (`best_match`), mesma fonte das horas recentes |
 | `11_experiment_inmet_validacao` | Como o Open-Meteo e o champion se saem contra chuva **medida** (INMET) nas cidades das estações? | Open-Meteo marca chuva em 2,4–2,9× mais horas que o pluviômetro (3 de 4 horas "chuvosas" estão secas no INMET), mas acerta o volume mensal (corr. 0,82–0,91). O v9 mantém F1 ≈ 0,69 contra o rótulo do Open-Meteo em outras cidades, mas cai para 0,22–0,46 contra a chuva medida — abaixo da persistência do próprio pluviômetro (0,40–0,61) |
 | `12_experiment_regional_inmet` | Treinar com chuva **medida** (INMET) melhora a previsão numa cidade sem estação? | Deixando cada estação de fora (como Birigui): F1 contra chuva medida 0,328 (champion) → **0,427** (regional), AUC 0,849 → 0,894; melhora nas 4 cidades. A persistência do pluviômetro (0,561) segue melhor, mas exige uma estação no local |
+| `14_experiment_mos_multimodelo` | Combinar 6 modelos (ECMWF, GFS, ICON, JMA, GEM e best_match), previstos 1 e 2 dias antes, bate a previsão crua da Open-Meteo? | **Sim, nos dois rótulos.** Birigui (rótulo Open-Meteo, últimos 12 meses): F1 0,539 → **0,582** a 1 dia e 0,515 → 0,569 a 2 dias; AUC 0,725 → 0,880. Chuva **medida** (INMET, estação fora do treino; F1 ponderado pelas horas): 0,256 → **0,307** a 1 dia e 0,240 → 0,284 a 2 dias; AUC ~0,67 → ~0,84. Só contar votos dos modelos já ajuda (0,282 a 1 dia). O melhor modelo sozinho costuma ser o ECMWF |
+| `15_experiment_merge_validacao` | O MERGE/CPTEC (satélite + pluviômetros) serve de chuva medida para Birigui? | **Não.** Nas estações do INMET bate hora a hora (corr. 0,77, F1 0,81), porque as usa; contra os 5 postos da ANA em Birigui (independentes, 243 dias): corr. diária 0,37 (Open-Meteo 0,57), 45% do volume (Open-Meteo 80%), chuva em 14% dos dias (postos 29%) |
 
 **Top 5 features por correlação com target:**
 ```
@@ -179,7 +181,9 @@ weather-ml-rain-forecast/
 ├── 10_experiment_fonte_historica.py # Experimento: ERA5 puro vs série mista
 ├── 11_experiment_inmet_validacao.py # Validação com chuva medida (INMET) — roda no job semanal
 ├── 12_experiment_regional_inmet.py  # Experimento: modelo regional treinado com chuva medida
-└── 13_train_regional_inmet.py       # Treino mensal do modelo regional (chuva medida, INMET)
+├── 13_train_regional_inmet.py       # Treino mensal do modelo regional (chuva medida, INMET)
+├── 14_experiment_mos_multimodelo.py # Experimento: MOS com 6 modelos (Previous Runs) contra a API
+└── 15_experiment_merge_validacao.py # Experimento: MERGE/CPTEC como chuva medida para Birigui
 ```
 
 ---
